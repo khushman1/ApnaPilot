@@ -80,10 +80,10 @@ def run(
         help=(
             "Pipeline stages to run. "
             f"Valid: {', '.join(VALID_STAGES)}, all. "
-            "Defaults to 'all' if omitted."
+            "Defaults to discover -> enrich -> score if omitted."
         ),
     ),
-    min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for tailor/cover stages."),
+    min_score: int = typer.Option(70, "--min-score", help="Minimum fit score for optional tailor/cover stages."),
     workers: int = typer.Option(1, "--workers", "-w", help="Parallel threads for discovery/enrichment stages."),
     stream: bool = typer.Option(False, "--stream", help="Run stages concurrently (streaming mode)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview stages without executing."),
@@ -91,19 +91,19 @@ def run(
         "normal",
         "--validation",
         help=(
-            "Validation strictness for tailor/cover stages. "
+            "Validation strictness for optional tailor/cover stages. "
             "strict: banned words = errors, judge must pass. "
             "normal: banned words = warnings only (default, recommended for Gemini free tier). "
             "lenient: banned words ignored, LLM judge skipped (fastest, fewest API calls)."
         ),
     ),
 ) -> None:
-    """Run pipeline stages: discover, enrich, score, tailor, cover, pdf."""
+    """Run pipeline stages. Default flow is discover, enrich, score."""
     _bootstrap()
 
     from applypilot.pipeline import run_pipeline
 
-    stage_list = stages if stages else ["all"]
+    stage_list = stages if stages else None
 
     # Validate stage names
     for s in stage_list:
@@ -146,7 +146,7 @@ def run(
 def apply(
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
     workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel browser workers."),
-    min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for job selection."),
+    min_score: int = typer.Option(70, "--min-score", help="Minimum fit score for job selection."),
     model: str = typer.Option("haiku", "--model", "-m", help="Claude model name."),
     continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
@@ -197,16 +197,20 @@ def apply(
         )
         raise typer.Exit(code=1)
 
-    # Check 3: Tailored resumes exist (skip for --gen with --url)
+    # Check 3: There are auto-eligible jobs available (skip for --gen with --url)
     if not (gen and url):
         conn = get_connection()
         ready = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND applied_at IS NULL"
+            "SELECT COUNT(*) FROM jobs "
+            "WHERE fit_score BETWEEN 70 AND 89 "
+            "AND COALESCE(human_review_required, 0) = 0 "
+            "AND application_url IS NOT NULL "
+            "AND applied_at IS NULL"
         ).fetchone()[0]
         if ready == 0:
             console.print(
-                "[red]No tailored resumes ready.[/red]\n"
-                "Run [bold]applypilot run score tailor[/bold] first to prepare applications."
+                "[red]No auto-eligible jobs ready.[/red]\n"
+                "Run [bold]applypilot run[/bold] first to discover, enrich, and score jobs."
             )
             raise typer.Exit(code=1)
 
@@ -279,32 +283,36 @@ def status() -> None:
     summary.add_row("Scored by LLM", str(stats["scored"]))
     summary.add_row("Pending scoring", str(stats["unscored"]))
     summary.add_row("Tailored resumes", str(stats["tailored"]))
-    summary.add_row("Pending tailoring (7+)", str(stats["untailored_eligible"]))
+    summary.add_row("Pending tailoring (70-89)", str(stats["untailored_eligible"]))
     summary.add_row("Cover letters", str(stats["with_cover_letter"]))
     summary.add_row("Ready to apply", str(stats["ready_to_apply"]))
+    summary.add_row("Human review queued (90+)", str(stats["human_review_required"]))
+    summary.add_row("Human review synced", str(stats["human_review_synced"]))
+    summary.add_row("Human review pending sync", str(stats["human_review_pending_sync"]))
+    summary.add_row("Human review sync errors", str(stats["human_review_sync_errors"]))
     summary.add_row("Applied", str(stats["applied"]))
     summary.add_row("Apply errors", str(stats["apply_errors"]))
 
     console.print(summary)
 
     # Score distribution
-    if stats["score_distribution"]:
-        dist_table = Table(title="\nScore Distribution", show_header=True, header_style="bold yellow")
-        dist_table.add_column("Score", justify="center")
+    if stats["score_buckets"]:
+        dist_table = Table(title="\nScore Buckets", show_header=True, header_style="bold yellow")
+        dist_table.add_column("Bucket")
         dist_table.add_column("Count", justify="right")
         dist_table.add_column("Bar")
 
-        max_count = max(count for _, count in stats["score_distribution"]) or 1
-        for score, count in stats["score_distribution"]:
+        max_count = max(count for _, count in stats["score_buckets"]) or 1
+        for bucket, count in stats["score_buckets"]:
             bar_len = int(count / max_count * 30)
-            if score >= 7:
+            if "90+" in bucket:
                 color = "green"
-            elif score >= 5:
+            elif "70-89" in bucket:
                 color = "yellow"
             else:
                 color = "red"
             bar = f"[{color}]{'=' * bar_len}[/{color}]"
-            dist_table.add_row(str(score), str(count), bar)
+            dist_table.add_row(bucket, str(count), bar)
 
         console.print(dist_table)
 
@@ -330,6 +338,32 @@ def dashboard() -> None:
     from applypilot.view import open_dashboard
 
     open_dashboard()
+
+
+@app.command("sync-human-review")
+def sync_human_review(limit: int = typer.Option(100, "--limit", "-l", help="Max human-review jobs to sync.")) -> None:
+    """Sync queued human-review jobs to Google Sheets via webhook."""
+    _bootstrap()
+
+    from applypilot.human_review import sync_human_review_jobs
+
+    result = sync_human_review_jobs(limit=limit)
+    status_text = result.get("status", "unknown")
+    message = result.get("message", "")
+
+    if status_text == "ok":
+        console.print(
+            f"[green]Synced {result.get('synced', 0)} human-review job(s).[/green]"
+            + (f" [dim]{message}[/dim]" if message else "")
+        )
+        return
+
+    if status_text == "skipped":
+        console.print(f"[yellow]Skipped:[/yellow] {message}")
+        return
+
+    console.print(f"[red]Human-review sync failed:[/red] {message}")
+    raise typer.Exit(code=1)
 
 
 @app.command()
@@ -394,6 +428,11 @@ def doctor() -> None:
     else:
         results.append(("LLM API key", fail_mark,
                         "Set GEMINI_API_KEY in ~/.applypilot/.env (run 'applypilot init')"))
+
+    if os.environ.get("GOOGLE_SHEETS_WEBHOOK_URL"):
+        results.append(("Human review webhook", ok_mark, "Google Sheets webhook configured"))
+    else:
+        results.append(("Human review webhook", warn_mark, "Optional: set GOOGLE_SHEETS_WEBHOOK_URL for Sheets sync"))
 
     # --- Tier 3 checks ---
     # Claude Code CLI

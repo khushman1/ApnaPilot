@@ -162,13 +162,32 @@ def load_base_urls() -> dict[str, str | None]:
 # ---------------------------------------------------------------------------
 
 DEFAULTS = {
-    "min_score": 7,
+    "min_score": 70,
+    "human_review_score": 90,
     "max_apply_attempts": 3,
     "max_tailor_attempts": 5,
     "poll_interval": 60,
     "apply_timeout": 300,
     "viewport": "1280x900",
+    "google_sheets_timeout_sec": 10,
 }
+
+
+def get_int_env(name: str, default: int) -> int:
+    """Read an integer environment variable with a safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def get_human_review_score() -> int:
+    """Threshold at or above which jobs enter human review."""
+    score = get_int_env("HUMAN_REVIEW_SCORE", DEFAULTS["human_review_score"])
+    return max(1, min(100, score))
 
 
 def load_env():

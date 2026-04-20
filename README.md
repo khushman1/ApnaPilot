@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/7ee3417f-43d4-4245-9952-35df1e77f2df
 
 ## What It Does
 
-ApplyPilot is a 6-stage autonomous job application pipeline. It discovers jobs across 5+ boards, scores them against your resume with AI, tailors your resume per job, writes cover letters, and **submits applications for you**. It navigates forms, uploads documents, answers screening questions, all hands-free.
+ApplyPilot is an autonomous job application pipeline. It discovers jobs across 5+ boards, scores them against your resume with AI, routes the highest-signal jobs to human review, and **submits auto-eligible applications for you**. It navigates forms, uploads your resume, answers screening questions, and hands off only when a required cover letter needs human attention.
 
 Three commands. That's it.
 
@@ -31,7 +31,7 @@ pip install applypilot
 pip install --no-deps python-jobspy && pip install pydantic tls-client requests markdownify regex
 applypilot init          # one-time setup: resume, profile, preferences, API keys
 applypilot doctor        # verify your setup — shows what's installed and what's missing
-applypilot run           # discover > enrich > score > tailor > cover letters
+applypilot run           # discover > enrich > score
 applypilot run -w 4      # same but parallel (4 threads for discovery/enrichment)
 applypilot apply         # autonomous browser-driven submission
 applypilot apply -w 3    # parallel apply (3 Chrome instances)
@@ -44,15 +44,15 @@ applypilot apply --dry-run  # fill forms without submitting
 
 ## Two Paths
 
-### Full Pipeline (recommended)
+### Default Flow (recommended)
 **Requires:** Python 3.11+, Node.js (for npx), Gemini API key (free), Claude Code CLI, Chrome
 
-Runs all 6 stages, from job discovery to autonomous application submission. This is the full power of ApplyPilot.
+Runs discovery, enrichment, and scoring, then applies automatically to auto-eligible jobs. Human-review jobs and required cover-letter cases are handed off cleanly.
 
-### Discovery + Tailoring Only
+### Manual Resume Prep
 **Requires:** Python 3.11+, Gemini API key (free)
 
-Runs stages 1-5: discovers jobs, scores them, tailors your resume, generates cover letters. You submit applications manually with the AI-prepared materials.
+Runs optional manual stages like `tailor`, `cover`, and `pdf` when you explicitly ask for them. These are no longer part of the default automation flow.
 
 ---
 
@@ -62,10 +62,10 @@ Runs stages 1-5: discovers jobs, scores them, tailors your resume, generates cov
 |-------|-------------|
 | **1. Discover** | Scrapes 5 job boards (Indeed, LinkedIn, Glassdoor, ZipRecruiter, Google Jobs) + 48 Workday employer portals + 30 direct career sites |
 | **2. Enrich** | Fetches full job descriptions via JSON-LD, CSS selectors, or AI-powered extraction |
-| **3. Score** | AI rates every job 1-10 based on your resume and preferences. Only high-fit jobs proceed |
-| **4. Tailor** | AI rewrites your resume per job: reorganizes, emphasizes relevant experience, adds keywords. Never fabricates |
-| **5. Cover Letter** | AI generates a targeted cover letter per job |
-| **6. Auto-Apply** | Claude Code navigates application forms, fills fields, uploads documents, answers questions, and submits |
+| **3. Score** | AI rates every job 1-100 based on your resume and preferences. Jobs at 90+ go to human review; 70-89 proceed automatically |
+| **4. Tailor** | Optional manual stage. AI rewrites your resume per job when you explicitly request it |
+| **5. Cover Letter** | Optional manual stage. Cover letters are otherwise generated only when an application requires one |
+| **6. Auto-Apply** | Claude Code navigates application forms, fills fields, uploads your resume, answers questions, and submits |
 
 Each stage is independent. Run them all or pick what you need.
 
@@ -76,7 +76,7 @@ Each stage is independent. Run them all or pick what you need.
 | Feature | ApplyPilot | AIHawk | Manual |
 |---------|-----------|--------|--------|
 | Job discovery | 5 boards + Workday + direct sites | LinkedIn only | One board at a time |
-| AI scoring | 1-10 fit score per job | Basic filtering | Your gut feeling |
+| AI scoring | 1-100 fit score per job | Basic filtering | Your gut feeling |
 | Resume tailoring | Per-job AI rewrite | Template-based | Hours per application |
 | Auto-apply | Full form navigation + submission | LinkedIn Easy Apply only | Click, type, repeat |
 | Supported sites | Indeed, LinkedIn, Glassdoor, ZipRecruiter, Google Jobs, 46 Workday portals, 28 direct sites | LinkedIn | Whatever you open |
@@ -117,7 +117,7 @@ Your personal data in one structured file: contact info, work authorization, com
 Job search queries, target titles, locations, boards. Run multiple searches with different parameters.
 
 ### `.env`
-API keys and runtime config: `GEMINI_API_KEY`, `LLM_MODEL`, `CAPSOLVER_API_KEY` (optional).
+API keys and runtime config: `GEMINI_API_KEY`, `LLM_MODEL`, `CAPSOLVER_API_KEY` (optional), and optional human-review sync settings: `HUMAN_REVIEW_SCORE`, `GOOGLE_SHEETS_WEBHOOK_URL`, `GOOGLE_SHEETS_WEBHOOK_SECRET`.
 
 ### Package configs (shipped with ApplyPilot)
 - `config/employers.yaml` - Workday employer registry (48 preconfigured)
@@ -135,7 +135,7 @@ Queries Indeed, LinkedIn, Glassdoor, ZipRecruiter, Google Jobs via JobSpy. Scrap
 Visits each job URL and extracts the full description. 3-tier cascade: JSON-LD structured data, then CSS selector patterns, then AI-powered extraction for unknown layouts.
 
 ### Score
-AI scores every job 1-10 against your profile. 9-10 = strong match, 7-8 = good, 5-6 = moderate, 1-4 = skip. Only jobs above your threshold proceed to tailoring.
+AI scores every job 1-100 against your profile. 90-100 = human review, 70-89 = auto-eligible, under 70 = skip. Auto-eligible jobs proceed directly to automated apply.
 
 ### Tailor
 Generates a custom resume per job: reorders experience, emphasizes relevant skills, incorporates keywords from the job description. Your `resume_facts` (companies, projects, metrics) are preserved exactly. The AI reorganizes but never fabricates.
@@ -144,7 +144,7 @@ Generates a custom resume per job: reorders experience, emphasizes relevant skil
 Writes a targeted cover letter per job referencing the specific company, role, and how your experience maps to their requirements.
 
 ### Auto-Apply
-Claude Code launches a Chrome instance, navigates to each application page, detects the form type, fills personal information and work history, uploads the tailored resume and cover letter, answers screening questions with AI, and submits. A live dashboard shows progress in real-time.
+Claude Code launches a Chrome instance, navigates to each application page, detects the form type, fills personal information and work history, uploads your base resume, answers screening questions with AI, and submits. If a required cover letter appears, ApplyPilot stops automation, generates the letter, and moves the job to the human-review sheet for manual follow-up. A live dashboard shows progress in real-time.
 
 The Playwright MCP server is configured automatically at runtime per worker. No manual MCP setup needed.
 
@@ -163,15 +163,18 @@ applypilot apply --gen --url URL       # generate prompt file for manual debuggi
 ```
 applypilot init                         # First-time setup wizard
 applypilot doctor                       # Verify setup, diagnose missing requirements
-applypilot run [stages...]              # Run pipeline stages (or 'all')
+applypilot run [stages...]              # Run pipeline stages (defaults to discover/enrich/score)
 applypilot run --workers 4              # Parallel discovery/enrichment
-applypilot run --stream                 # Concurrent stages (streaming mode)
-applypilot run --min-score 8            # Override score threshold
+applypilot run --stream                 # Concurrent default stages (streaming mode)
+applypilot run --min-score 80           # Override score threshold
 applypilot run --dry-run                # Preview without executing
 applypilot run --validation lenient     # Relax validation (recommended for Gemini free tier)
 applypilot run --validation strict      # Strictest validation (retries on any banned word)
+applypilot run tailor                   # Optional manual resume tailoring
+applypilot run cover                    # Optional bulk cover-letter generation
 applypilot apply                        # Launch auto-apply
 applypilot apply --workers 3            # Parallel browser workers
+applypilot sync-human-review            # Push 90+ jobs to Google Sheets
 applypilot apply --dry-run              # Fill forms without submitting
 applypilot apply --continuous           # Run forever, polling for new jobs
 applypilot apply --headless             # Headless browser mode

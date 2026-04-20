@@ -87,7 +87,7 @@ def _make_mcp_config(cdp_port: int) -> dict:
 # Database operations
 # ---------------------------------------------------------------------------
 
-def acquire_job(target_url: str | None = None, min_score: int = 7,
+def acquire_job(target_url: str | None = None, min_score: int = 70,
                 worker_id: int = 0) -> dict | None:
     """Atomically acquire the next job to apply to.
 
@@ -110,10 +110,11 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                        fit_score, location, full_description, cover_letter_path
                 FROM jobs
                 WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
-                  AND tailored_resume_path IS NOT NULL
-                  AND apply_status != 'in_progress'
+                  AND fit_score >= ?
+                  AND COALESCE(human_review_required, 0) = 0
+                  AND (apply_status IS NULL OR apply_status != 'in_progress')
                 LIMIT 1
-            """, (target_url, target_url, like, like)).fetchone()
+            """, (target_url, target_url, like, like, min_score)).fetchone()
         else:
             blocked_sites, blocked_patterns = _load_blocked()
             # Build parameterized filters to avoid SQL injection
@@ -131,15 +132,15 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                 SELECT url, title, site, application_url, tailored_resume_path,
                        fit_score, location, full_description, cover_letter_path
                 FROM jobs
-                WHERE tailored_resume_path IS NOT NULL
+                WHERE fit_score >= ?
                   AND (apply_status IS NULL OR apply_status = 'failed')
                   AND (apply_attempts IS NULL OR apply_attempts < ?)
-                  AND fit_score >= ?
+                  AND COALESCE(human_review_required, 0) = 0
                   {site_clause}
                   {url_clauses}
                 ORDER BY fit_score DESC, url
                 LIMIT 1
-            """, [config.DEFAULTS["max_apply_attempts"]] + params).fetchone()
+            """, [min_score, config.DEFAULTS["max_apply_attempts"]] + params[1:]).fetchone()
 
         if not row:
             conn.rollback()
@@ -185,6 +186,13 @@ def mark_result(url: str, status: str, error: str | None = None,
                            apply_duration_ms = ?, apply_task_id = ?
             WHERE url = ?
         """, (now, duration_ms, task_id, url))
+    elif status == "human_review":
+        conn.execute("""
+            UPDATE jobs SET apply_status = 'human_review', apply_error = ?,
+                           apply_attempts = COALESCE(apply_attempts, 0) + 1,
+                           agent_id = NULL, apply_duration_ms = ?, apply_task_id = ?
+            WHERE url = ?
+        """, (error or "human_review", duration_ms, task_id, url))
     else:
         attempts = 99 if permanent else "COALESCE(apply_attempts, 0) + 1"
         conn.execute(f"""
@@ -210,7 +218,7 @@ def release_lock(url: str) -> None:
 # Utility modes (--gen, --mark-applied, --mark-failed, --reset-failed)
 # ---------------------------------------------------------------------------
 
-def gen_prompt(target_url: str, min_score: int = 7,
+def gen_prompt(target_url: str, min_score: int = 70,
                model: str = "sonnet", worker_id: int = 0) -> Path | None:
     """Generate a prompt file and print the Claude CLI command for manual debugging.
 
@@ -221,14 +229,12 @@ def gen_prompt(target_url: str, min_score: int = 7,
     if not job:
         return None
 
-    # Read resume text
+    # Read resume text (tailored if present, otherwise base resume)
     resume_path = job.get("tailored_resume_path")
-    txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
-    resume_text = ""
-    if txt_path and txt_path.exists():
-        resume_text = txt_path.read_text(encoding="utf-8")
+    txt_path = Path(resume_path).with_suffix(".txt") if resume_path else config.RESUME_PATH
+    resume_text = txt_path.read_text(encoding="utf-8") if txt_path.exists() else ""
 
-    prompt = prompt_mod.build_prompt(job=job, tailored_resume=resume_text)
+    prompt = prompt_mod.build_prompt(job=job, resume_text=resume_text)
 
     # Release the lock so the job stays available
     release_lock(job["url"])
@@ -284,7 +290,8 @@ def reset_failed() -> int:
                        apply_attempts = 0, agent_id = NULL
         WHERE apply_status = 'failed'
           OR (apply_status IS NOT NULL AND apply_status != 'applied'
-              AND apply_status != 'in_progress')
+              AND apply_status != 'in_progress'
+              AND apply_status != 'human_review')
     """)
     conn.commit()
     return cursor.rowcount
@@ -301,19 +308,17 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     Returns:
         Tuple of (status_string, duration_ms). Status is one of:
         'applied', 'expired', 'captcha', 'login_issue',
-        'failed:reason', or 'skipped'.
+        'human_review:cover_letter_required', 'failed:reason', or 'skipped'.
     """
-    # Read tailored resume text
+    # Read resume text (tailored if present, otherwise base resume)
     resume_path = job.get("tailored_resume_path")
-    txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
-    resume_text = ""
-    if txt_path and txt_path.exists():
-        resume_text = txt_path.read_text(encoding="utf-8")
+    txt_path = Path(resume_path).with_suffix(".txt") if resume_path else config.RESUME_PATH
+    resume_text = txt_path.read_text(encoding="utf-8") if txt_path.exists() else ""
 
     # Build the prompt
     agent_prompt = prompt_mod.build_prompt(
         job=job,
-        tailored_resume=resume_text,
+        resume_text=resume_text,
         dry_run=dry_run,
     )
 
@@ -360,7 +365,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         f"\n{'=' * 60}\n"
         f"[{ts_header}] {job['title']} @ {job.get('site', '')}\n"
         f"URL: {job.get('application_url') or job['url']}\n"
-        f"Score: {job.get('fit_score', 'N/A')}/10\n"
+        f"Score: {job.get('fit_score', 'N/A')}/100\n"
         f"{'=' * 60}\n"
     )
 
@@ -472,6 +477,15 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                              last_action=f"{result_status} ({elapsed}s)")
                 return result_status.lower(), duration_ms
 
+        if "RESULT:HUMAN_REVIEW:" in output:
+            for out_line in output.split("\n"):
+                if "RESULT:HUMAN_REVIEW:" in out_line:
+                    reason = _clean_reason(out_line.split("RESULT:HUMAN_REVIEW:")[-1].strip()) or "unknown"
+                    add_event(f"[W{worker_id}] HUMAN REVIEW ({elapsed}s): {reason[:30]}")
+                    update_state(worker_id, status="human_review",
+                                 last_action=f"HUMAN REVIEW: {reason[:20]}")
+                    return f"human_review:{reason}", duration_ms
+
         if "RESULT:FAILED" in output:
             for out_line in output.split("\n"):
                 if "RESULT:FAILED" in out_line:
@@ -547,7 +561,7 @@ def _is_permanent_failure(result: str) -> bool:
 
 def worker_loop(worker_id: int = 0, limit: int = 1,
                 target_url: str | None = None,
-                min_score: int = 7, headless: bool = False,
+                min_score: int = 70, headless: bool = False,
                 model: str = "sonnet", dry_run: bool = False) -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
@@ -613,6 +627,37 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 applied += 1
                 update_state(worker_id, jobs_applied=applied,
                              jobs_done=applied + failed)
+            elif result.startswith("human_review:"):
+                reason = result.split(":", 1)[-1]
+                if reason == "cover_letter_required":
+                    from applypilot.human_review import promote_job_to_cover_letter_human_review
+
+                    handoff = promote_job_to_cover_letter_human_review(job)
+                    if handoff["sync_result"]["status"] == "error":
+                        logger.warning(
+                            "Human-review sync failed for %s: %s",
+                            job["url"],
+                            handoff["sync_result"]["message"],
+                        )
+                else:
+                    conn = get_connection()
+                    now = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET human_review_required = 1,
+                            human_review_reason = ?,
+                            human_review_marked_at = ?,
+                            human_review_synced_at = NULL,
+                            human_review_sync_error = NULL
+                        WHERE url = ?
+                        """,
+                        (reason, now, job["url"]),
+                    )
+                    conn.commit()
+                mark_result(job["url"], "human_review", error=reason, duration_ms=duration_ms)
+                update_state(worker_id, status="human_review",
+                             last_action=f"HANDOFF: {reason[:25]}")
             else:
                 reason = result.split(":", 1)[-1] if ":" in result else result
                 mark_result(job["url"], "failed", reason,
@@ -651,7 +696,7 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 # ---------------------------------------------------------------------------
 
 def main(limit: int = 1, target_url: str | None = None,
-         min_score: int = 7, headless: bool = False, model: str = "sonnet",
+         min_score: int = 70, headless: bool = False, model: str = "sonnet",
          dry_run: bool = False, continuous: bool = False,
          poll_interval: int = 60, workers: int = 1) -> None:
     """Launch the apply pipeline.

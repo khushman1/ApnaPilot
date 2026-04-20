@@ -10,7 +10,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from applypilot.config import DB_PATH
+from applypilot.config import DB_PATH, DEFAULTS
 
 # Thread-local connection storage — each thread gets its own connection
 # (required for SQLite thread safety with parallel workers)
@@ -87,6 +87,9 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     conn = get_connection(path)
+    table_existed = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone() is not None
     conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             -- Discovery stage (smart_extract / job_search)
@@ -129,13 +132,28 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             last_attempted_at     TEXT,
             apply_duration_ms     INTEGER,
             apply_task_id         TEXT,
-            verification_confidence TEXT
+            verification_confidence TEXT,
+
+            -- Human review stage
+            human_review_required INTEGER DEFAULT 0,
+            human_review_reason   TEXT,
+            human_review_marked_at TEXT,
+            human_review_synced_at TEXT,
+            human_review_sync_error TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
     """)
     conn.commit()
 
     # Run migrations for any columns added after initial schema
-    ensure_columns(conn)
+    added = ensure_columns(conn)
+    if table_existed and any(col.startswith("human_review_") for col in added):
+        _migrate_legacy_fit_scores(conn)
 
     return conn
 
@@ -180,7 +198,46 @@ _ALL_COLUMNS: dict[str, str] = {
     "apply_duration_ms": "INTEGER",
     "apply_task_id": "TEXT",
     "verification_confidence": "TEXT",
+    # Human review
+    "human_review_required": "INTEGER DEFAULT 0",
+    "human_review_reason": "TEXT",
+    "human_review_marked_at": "TEXT",
+    "human_review_synced_at": "TEXT",
+    "human_review_sync_error": "TEXT",
 }
+
+
+def _meta_get(conn: sqlite3.Connection, key: str) -> str | None:
+    """Return a metadata value from app_meta."""
+    row = conn.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _meta_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Upsert a metadata value in app_meta."""
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES(?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+def _migrate_legacy_fit_scores(conn: sqlite3.Connection) -> int:
+    """One-time migration for databases created before the 1-100 score scale.
+
+    Only runs on upgraded databases when the human-review columns are added.
+    Fresh databases should not enter this code path.
+    """
+    if _meta_get(conn, "fit_score_scale") == "1-100":
+        return 0
+
+    changed = conn.execute(
+        "UPDATE jobs SET fit_score = fit_score * 10 "
+        "WHERE fit_score IS NOT NULL AND fit_score BETWEEN 1 AND 10"
+    ).rowcount
+    _meta_set(conn, "fit_score_scale", "1-100")
+    conn.commit()
+    return changed
 
 
 def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:
@@ -278,6 +335,17 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
         "GROUP BY fit_score ORDER BY fit_score DESC"
     ).fetchall()
     stats["score_distribution"] = [(row[0], row[1]) for row in dist_rows]
+    stats["score_buckets"] = [
+        ("Human review (90+)", conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE fit_score >= 90"
+        ).fetchone()[0]),
+        ("Auto-eligible (70-89)", conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE fit_score BETWEEN 70 AND 89"
+        ).fetchone()[0]),
+        ("Skip (<70)", conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL AND fit_score < 70"
+        ).fetchone()[0]),
+    ]
 
     # Tailoring stage
     stats["tailored"] = conn.execute(
@@ -286,7 +354,9 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     stats["untailored_eligible"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
-        "WHERE fit_score >= 7 AND full_description IS NOT NULL "
+        "WHERE fit_score >= 70 AND fit_score < 90 "
+        "AND COALESCE(human_review_required, 0) = 0 "
+        "AND full_description IS NOT NULL "
         "AND tailored_resume_path IS NULL"
     ).fetchone()[0]
 
@@ -318,9 +388,27 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     stats["ready_to_apply"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
-        "WHERE tailored_resume_path IS NOT NULL "
+        "WHERE fit_score BETWEEN 70 AND 89 "
         "AND applied_at IS NULL "
+        "AND COALESCE(human_review_required, 0) = 0 "
         "AND application_url IS NOT NULL"
+    ).fetchone()[0]
+
+    # Human review stage
+    stats["human_review_required"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1"
+    ).fetchone()[0]
+    stats["human_review_synced"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
+        "AND human_review_synced_at IS NOT NULL"
+    ).fetchone()[0]
+    stats["human_review_pending_sync"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
+        "AND human_review_synced_at IS NULL"
+    ).fetchone()[0]
+    stats["human_review_sync_errors"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
+        "AND human_review_sync_error IS NOT NULL"
     ).fetchone()[0]
 
     return stats
@@ -388,12 +476,14 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         "scored": "fit_score IS NOT NULL",
         "pending_tailor": (
             "fit_score >= ? AND full_description IS NOT NULL "
+            "AND COALESCE(human_review_required, 0) = 0 "
             "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
         ),
         "tailored": "tailored_resume_path IS NOT NULL",
         "pending_apply": (
-            "tailored_resume_path IS NOT NULL AND applied_at IS NULL "
-            "AND application_url IS NOT NULL"
+            "fit_score BETWEEN 70 AND 89 AND applied_at IS NULL "
+            "AND application_url IS NOT NULL "
+            "AND COALESCE(human_review_required, 0) = 0"
         ),
         "applied": "applied_at IS NOT NULL",
     }
@@ -404,7 +494,7 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
     if "?" in where and min_score is not None:
         params.append(min_score)
     elif "?" in where:
-        params.append(7)  # default min_score
+        params.append(DEFAULTS["min_score"])
 
     if min_score is not None and "fit_score" not in where and stage in ("scored", "tailored", "applied"):
         where += " AND fit_score >= ?"

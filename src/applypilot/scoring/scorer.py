@@ -1,18 +1,18 @@
 """Job fit scoring: LLM-powered evaluation of candidate-job match quality.
 
-Scores jobs on a 1-10 scale by comparing the user's resume against each
+Scores jobs on a 1-100 scale by comparing the user's resume against each
 job description. All personal data is loaded at runtime from the user's
 profile and resume file.
 """
 
-import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
 
-from applypilot.config import RESUME_PATH, load_profile
+from applypilot.config import RESUME_PATH, get_human_review_score
 from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.human_review import sync_human_review_jobs, webhook_configured
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -23,11 +23,10 @@ log = logging.getLogger(__name__)
 SCORE_PROMPT = """You are a job fit evaluator. Given a candidate's resume and a job description, score how well the candidate fits the role.
 
 SCORING CRITERIA:
-- 9-10: Perfect match. Candidate has direct experience in nearly all required skills and qualifications.
-- 7-8: Strong match. Candidate has most required skills, minor gaps easily bridged.
-- 5-6: Moderate match. Candidate has some relevant skills but missing key requirements.
-- 3-4: Weak match. Significant skill gaps, would need substantial ramp-up.
-- 1-2: Poor match. Completely different field or experience level.
+- 90-100: Exceptional match. Direct experience across the critical skills, domain, and seniority required.
+- 70-89: Strong match. Most required skills are present and gaps are minor or learnable.
+- 40-69: Partial match. Some relevant overlap, but meaningful requirements are missing.
+- 1-39: Weak match. Major gaps in domain, skills, or seniority.
 
 IMPORTANT FACTORS:
 - Weight technical skills heavily (programming languages, frameworks, tools)
@@ -36,7 +35,7 @@ IMPORTANT FACTORS:
 - Be realistic about experience level vs. job requirements (years of experience, seniority)
 
 RESPOND IN EXACTLY THIS FORMAT (no other text):
-SCORE: [1-10]
+SCORE: [1-100]
 KEYWORDS: [comma-separated ATS keywords from the job description that match or could match the candidate]
 REASONING: [2-3 sentences explaining the score]"""
 
@@ -59,7 +58,7 @@ def _parse_score_response(response: str) -> dict:
         if line.startswith("SCORE:"):
             try:
                 score = int(re.search(r"\d+", line).group())
-                score = max(1, min(10, score))
+                score = max(1, min(100, score))
             except (AttributeError, ValueError):
                 score = 0
         elif line.startswith("KEYWORDS:"):
@@ -136,10 +135,12 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     completed = 0
     errors = 0
     results: list[dict] = []
+    human_review_score = get_human_review_score()
 
     for job in jobs:
         result = score_job(resume_text, job)
         result["url"] = job["url"]
+        result["human_review_required"] = int(result["score"] >= human_review_score)
         completed += 1
 
         if result["score"] == 0:
@@ -155,11 +156,41 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     # Write scores to DB
     now = datetime.now(timezone.utc).isoformat()
     for r in results:
+        if r["human_review_required"]:
+            review_reason = f"score>={human_review_score}"
+            marked_at = now
+            synced_at = None
+            sync_error = None
+        else:
+            review_reason = None
+            marked_at = None
+            synced_at = None
+            sync_error = None
         conn.execute(
-            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
-            (r["score"], f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
+            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ?, "
+            "human_review_required = ?, human_review_reason = ?, human_review_marked_at = ?, "
+            "human_review_synced_at = ?, human_review_sync_error = ? "
+            "WHERE url = ?",
+            (
+                r["score"],
+                f"{r['keywords']}\n{r['reasoning']}",
+                now,
+                r["human_review_required"],
+                review_reason,
+                marked_at,
+                synced_at,
+                sync_error,
+                r["url"],
+            ),
         )
     conn.commit()
+
+    if webhook_configured():
+        flagged_urls = [r["url"] for r in results if r["human_review_required"]]
+        if flagged_urls:
+            sync_result = sync_human_review_jobs(limit=len(flagged_urls), urls=flagged_urls)
+            if sync_result["status"] == "error":
+                log.warning("Human-review sync failed after scoring: %s", sync_result["message"])
 
     elapsed = time.time() - t0
     log.info("Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0)

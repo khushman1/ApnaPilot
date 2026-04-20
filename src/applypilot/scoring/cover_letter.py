@@ -10,6 +10,7 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
 from applypilot.database import get_connection, get_jobs_by_stage
@@ -183,9 +184,51 @@ def generate_cover_letter(
     return letter  # last attempt even if failed
 
 
+# ── Persistence Helpers ──────────────────────────────────────────────────
+
+def save_cover_letter_artifacts(job: dict, letter: str) -> dict:
+    """Persist a generated cover letter text file and best-effort PDF."""
+    COVER_LETTER_DIR.mkdir(parents=True, exist_ok=True)
+
+    safe_title = re.sub(r"[^\w\s-]", "", job["title"])[:50].strip().replace(" ", "_")
+    safe_site = re.sub(r"[^\w\s-]", "", job["site"])[:20].strip().replace(" ", "_")
+    prefix = f"{safe_site}_{safe_title}"
+
+    cl_path = COVER_LETTER_DIR / f"{prefix}_CL.txt"
+    cl_path.write_text(letter, encoding="utf-8")
+
+    pdf_path = None
+    try:
+        from applypilot.scoring.pdf import convert_to_pdf
+        pdf_path = str(convert_to_pdf(cl_path))
+    except Exception:
+        log.debug("PDF generation failed for %s", cl_path, exc_info=True)
+
+    return {"path": str(cl_path), "pdf_path": pdf_path}
+
+
+def generate_cover_letter_for_job(job: dict, validation_mode: str = "normal") -> dict:
+    """Generate and persist a cover letter for one job."""
+    profile = load_profile()
+    resume_path = job.get("tailored_resume_path")
+    txt_path = Path(resume_path).with_suffix(".txt") if resume_path else RESUME_PATH
+    if not txt_path.exists():
+        raise FileNotFoundError(f"Resume text not found: {txt_path}")
+
+    resume_text = txt_path.read_text(encoding="utf-8")
+    letter = generate_cover_letter(
+        resume_text,
+        job,
+        profile,
+        validation_mode=validation_mode,
+    )
+    saved = save_cover_letter_artifacts(job, letter)
+    return {"text": letter, **saved}
+
+
 # ── Batch Entry Point ────────────────────────────────────────────────────
 
-def run_cover_letters(min_score: int = 7, limit: int = 20,
+def run_cover_letters(min_score: int = 70, limit: int = 20,
                       validation_mode: str = "normal") -> dict:
     """Generate cover letters for high-scoring jobs that have tailored resumes.
 
@@ -205,6 +248,7 @@ def run_cover_letters(min_score: int = 7, limit: int = 20,
     jobs = conn.execute(
         "SELECT * FROM jobs "
         "WHERE fit_score >= ? AND tailored_resume_path IS NOT NULL "
+        "AND COALESCE(human_review_required, 0) = 0 "
         "AND full_description IS NOT NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < ? "
@@ -236,27 +280,12 @@ def run_cover_letters(min_score: int = 7, limit: int = 20,
         try:
             letter = generate_cover_letter(resume_text, job, profile,
                                           validation_mode=validation_mode)
-
-            # Build safe filename prefix
-            safe_title = re.sub(r"[^\w\s-]", "", job["title"])[:50].strip().replace(" ", "_")
-            safe_site = re.sub(r"[^\w\s-]", "", job["site"])[:20].strip().replace(" ", "_")
-            prefix = f"{safe_site}_{safe_title}"
-
-            cl_path = COVER_LETTER_DIR / f"{prefix}_CL.txt"
-            cl_path.write_text(letter, encoding="utf-8")
-
-            # Generate PDF (best-effort)
-            pdf_path = None
-            try:
-                from applypilot.scoring.pdf import convert_to_pdf
-                pdf_path = str(convert_to_pdf(cl_path))
-            except Exception:
-                log.debug("PDF generation failed for %s", cl_path, exc_info=True)
+            saved = save_cover_letter_artifacts(job, letter)
 
             result = {
                 "url": job["url"],
-                "path": str(cl_path),
-                "pdf_path": pdf_path,
+                "path": saved["path"],
+                "pdf_path": saved["pdf_path"],
                 "title": job["title"],
                 "site": job["site"],
             }

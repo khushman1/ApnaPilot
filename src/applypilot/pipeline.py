@@ -3,8 +3,8 @@
 Runs pipeline stages in sequence or concurrently (streaming mode).
 
 Usage (via CLI):
-    applypilot run                        # all stages, sequential
-    applypilot run --stream               # all stages, concurrent
+    applypilot run                        # default stages, sequential
+    applypilot run --stream               # default stages, concurrent
     applypilot run discover enrich        # specific stages
     applypilot run score tailor cover     # LLM-only stages
     applypilot run --dry-run              # preview without executing
@@ -33,11 +33,12 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+DEFAULT_RUN_STAGES = ("discover", "enrich", "score")
 
 STAGE_META: dict[str, dict] = {
     "discover": {"desc": "Job discovery (JobSpy + Workday + smart extract)"},
     "enrich":   {"desc": "Detail enrichment (full descriptions + apply URLs)"},
-    "score":    {"desc": "LLM scoring (fit 1-10)"},
+    "score":    {"desc": "LLM scoring (fit 1-100)"},
     "tailor":   {"desc": "Resume tailoring (LLM + validation)"},
     "cover":    {"desc": "Cover letter generation"},
     "pdf":      {"desc": "PDF conversion (tailored resumes + cover letters)"},
@@ -111,7 +112,7 @@ def _run_enrich(workers: int = 1) -> dict:
 
 
 def _run_score() -> dict:
-    """Stage: LLM scoring — assign fit scores 1-10."""
+    """Stage: LLM scoring — assign fit scores 1-100."""
     try:
         from applypilot.scoring.scorer import run_scoring
         run_scoring()
@@ -121,7 +122,7 @@ def _run_score() -> dict:
         return {"status": f"error: {e}"}
 
 
-def _run_tailor(min_score: int = 7, validation_mode: str = "normal") -> dict:
+def _run_tailor(min_score: int = 70, validation_mode: str = "normal") -> dict:
     """Stage: Resume tailoring — generate tailored resumes for high-fit jobs."""
     try:
         from applypilot.scoring.tailor import run_tailoring
@@ -132,7 +133,7 @@ def _run_tailor(min_score: int = 7, validation_mode: str = "normal") -> dict:
         return {"status": f"error: {e}"}
 
 
-def _run_cover(min_score: int = 7, validation_mode: str = "normal") -> dict:
+def _run_cover(min_score: int = 70, validation_mode: str = "normal") -> dict:
     """Stage: Cover letter generation."""
     try:
         from applypilot.scoring.cover_letter import run_cover_letters
@@ -225,12 +226,15 @@ _PENDING_SQL: dict[str, str] = {
     "score":  "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL",
     "tailor": (
         "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
+        "AND fit_score < 90 "
+        "AND COALESCE(human_review_required, 0) = 0 "
         "AND full_description IS NOT NULL "
         "AND tailored_resume_path IS NULL "
         "AND COALESCE(tailor_attempts, 0) < 5"
     ),
     "cover": (
         "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "AND COALESCE(human_review_required, 0) = 0 "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < 5"
     ),
@@ -244,7 +248,7 @@ _PENDING_SQL: dict[str, str] = {
 _STREAM_POLL_INTERVAL = 10
 
 
-def _count_pending(stage: str, min_score: int = 7) -> int:
+def _count_pending(stage: str, min_score: int = 70) -> int:
     """Count pending work items for a stage."""
     sql = _PENDING_SQL.get(stage)
     if sql is None:
@@ -259,7 +263,7 @@ def _run_stage_streaming(
     stage: str,
     tracker: _StageTracker,
     stop_event: threading.Event,
-    min_score: int = 7,
+    min_score: int = 70,
     workers: int = 1,
     validation_mode: str = "normal",
 ) -> None:
@@ -443,7 +447,7 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1,
 
 def run_pipeline(
     stages: list[str] | None = None,
-    min_score: int = 7,
+    min_score: int = 70,
     dry_run: bool = False,
     stream: bool = False,
     workers: int = 1,
@@ -452,7 +456,7 @@ def run_pipeline(
     """Run pipeline stages.
 
     Args:
-        stages: List of stage names, or None / ["all"] for full pipeline.
+        stages: List of stage names, or None for the default pipeline.
         min_score: Minimum fit score for tailor/cover stages.
         dry_run: If True, preview stages without executing.
         stream: If True, run stages concurrently (streaming mode).
@@ -468,7 +472,7 @@ def run_pipeline(
 
     # Resolve stages
     if stages is None:
-        stages = ["all"]
+        stages = list(DEFAULT_RUN_STAGES)
     ordered = _resolve_stages(stages)
 
     # Banner

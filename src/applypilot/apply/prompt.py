@@ -417,7 +417,7 @@ If CapSolver genuinely failed (errorId > 0):
 4. All else fails -> Output RESULT:CAPTCHA."""
 
 
-def build_prompt(job: dict, tailored_resume: str,
+def build_prompt(job: dict, resume_text: str,
                  cover_letter: str | None = None,
                  dry_run: bool = False) -> str:
     """Build the full instruction prompt for the apply agent.
@@ -427,8 +427,8 @@ def build_prompt(job: dict, tailored_resume: str,
 
     Args:
         job: Job dict from the database (must have url, title, site,
-             application_url, fit_score, tailored_resume_path).
-        tailored_resume: Plain-text content of the tailored resume.
+             application_url, fit_score, and optionally tailored_resume_path).
+        resume_text: Plain-text content of the resume to use for this application.
         cover_letter: Optional plain-text cover letter content.
         dry_run: If True, tell the agent not to click Submit.
 
@@ -440,10 +440,7 @@ def build_prompt(job: dict, tailored_resume: str,
     personal = profile["personal"]
 
     # --- Resolve resume PDF path ---
-    resume_path = job.get("tailored_resume_path")
-    if not resume_path:
-        raise ValueError(f"No tailored resume for job: {job.get('title', 'unknown')}")
-
+    resume_path = job.get("tailored_resume_path") or str(config.RESUME_PDF_PATH)
     src_pdf = Path(resume_path).with_suffix(".pdf").resolve()
     if not src_pdf.exists():
         raise ValueError(f"Resume PDF not found: {src_pdf}")
@@ -488,9 +485,9 @@ def build_prompt(job: dict, tailored_resume: str,
     city = personal.get("city", "the area")
     if not cover_letter_text:
         cl_display = (
-            f"None available. Skip if optional. If required, write 2 factual "
-            f"sentences: (1) relevant experience from the resume that matches "
-            f"this role, (2) available immediately and based in {city}."
+            f"None available. Skip if optional. If the application clearly requires a "
+            f"cover letter upload or text field, STOP automation and output "
+            f"RESULT:HUMAN_REVIEW:cover_letter_required. Do not improvise or write one in-browser."
         )
     else:
         cl_display = cover_letter_text
@@ -511,7 +508,7 @@ def build_prompt(job: dict, tailored_resume: str,
     if dry_run:
         submit_instruction = "IMPORTANT: Do NOT click the final Submit/Apply button. Review the form, verify all fields, then output RESULT:APPLIED with a note that this was a dry run."
     else:
-        submit_instruction = "BEFORE clicking Submit/Apply, take a snapshot and review EVERY field on the page. Verify all data matches the APPLICANT PROFILE and TAILORED RESUME -- name, email, phone, location, work auth, resume uploaded, cover letter if applicable. If anything is wrong or missing, fix it FIRST. Only click Submit after confirming everything is correct."
+        submit_instruction = "BEFORE clicking Submit/Apply, take a snapshot and review EVERY field on the page. Verify all data matches the APPLICANT PROFILE and RESUME -- name, email, phone, location, work auth, resume uploaded, cover letter if applicable. If anything is wrong or missing, fix it FIRST. Only click Submit after confirming everything is correct."
 
     prompt = f"""You are an autonomous job application agent. Your ONE mission: get this candidate an interview. You have all the information and tools. Think strategically. Act decisively. Submit the application.
 
@@ -519,14 +516,14 @@ def build_prompt(job: dict, tailored_resume: str,
 URL: {job.get('application_url') or job['url']}
 Title: {job['title']}
 Company: {job.get('site', 'Unknown')}
-Fit Score: {job.get('fit_score', 'N/A')}/10
+Fit Score: {job.get('fit_score', 'N/A')}/100
 
 == FILES ==
 Resume PDF (upload this): {pdf_path}
 Cover Letter PDF (upload if asked): {cl_upload_path or "N/A"}
 
 == RESUME TEXT (use when filling text fields) ==
-{tailored_resume}
+{resume_text}
 
 == COVER LETTER TEXT (paste if text field, upload PDF if file field) ==
 {cl_display}
@@ -574,10 +571,13 @@ If something unexpected happens and these instructions don't cover it, figure it
    5f. Need email verification? Use search_emails + read_email to get the code.
    5g. After login, run browser_tabs action "list" again. Switch back to the application tab if needed.
    5h. All failed? Output RESULT:FAILED:login_issue. Do not loop.
-6. Upload resume. ALWAYS upload fresh -- delete any existing resume first, then browser_file_upload with the PDF path above. This is the tailored resume for THIS job. Non-negotiable.
-7. Upload cover letter if there's a field for it. Text field -> paste the cover letter text. File upload -> use the cover letter PDF path.
+6. Upload resume. ALWAYS upload fresh -- delete any existing resume first, then browser_file_upload with the PDF path above. This is the source resume for this application. Non-negotiable.
+7. Cover letter handling:
+   - If the field is optional, skip it unless a cover letter file/text is already available above.
+   - If the field is clearly required and no cover letter file/text is available above, STOP and output RESULT:HUMAN_REVIEW:cover_letter_required.
+   - If a cover letter is available, text field -> paste the cover letter text. File upload -> use the cover letter PDF path.
 8. Check ALL pre-filled fields. ATS systems parse your resume and auto-fill -- it's often WRONG.
-   - "Current Job Title" or "Most Recent Title" -> use the title from the TAILORED RESUME summary, NOT whatever the parser guessed.
+   - "Current Job Title" or "Most Recent Title" -> use the most accurate title from the RESUME TEXT, NOT whatever the parser guessed.
    - Compare every other field to the APPLICANT PROFILE. Fix mismatches. Fill empty fields.
 9. Answer screening questions using the rules above.
 10. {submit_instruction}
@@ -589,6 +589,7 @@ RESULT:APPLIED -- submitted successfully
 RESULT:EXPIRED -- job closed or no longer accepting applications
 RESULT:CAPTCHA -- blocked by unsolvable captcha
 RESULT:LOGIN_ISSUE -- could not sign in or create account
+RESULT:HUMAN_REVIEW:cover_letter_required -- required cover letter found, hand off for human review
 RESULT:FAILED:not_eligible_location -- onsite outside acceptable area, no remote option
 RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
 RESULT:FAILED:reason -- any other failure (brief reason)
