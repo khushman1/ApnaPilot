@@ -45,7 +45,7 @@ applypilot apply --dry-run  # fill forms without submitting
 ## Two Paths
 
 ### Default Flow (recommended)
-**Requires:** Python 3.11+, Node.js (for npx), Gemini API key (free), Claude Code CLI, Chrome
+**Requires:** Python 3.11+, Node.js (for npx), Gemini API key (free), Claude Code or OpenCode CLI, Chrome
 
 Runs discovery, enrichment, and scoring, then applies automatically to auto-eligible jobs. Human-review jobs and required cover-letter cases are handed off cleanly.
 
@@ -65,7 +65,7 @@ Runs optional manual stages like `tailor`, `cover`, and `pdf` when you explicitl
 | **3. Score** | AI rates every job 1-100 based on your resume and preferences. Jobs at 90+ go to human review; 70-89 proceed automatically |
 | **4. Tailor** | Optional manual stage. AI rewrites your resume per job when you explicitly request it |
 | **5. Cover Letter** | Optional manual stage. Cover letters are otherwise generated only when an application requires one |
-| **6. Auto-Apply** | Claude Code navigates application forms, fills fields, uploads your resume, answers questions, and submits |
+| **6. Auto-Apply** | Claude Code or OpenCode navigates application forms, fills fields, uploads your resume, answers questions, and submits |
 
 Each stage is independent. Run them all or pick what you need.
 
@@ -92,7 +92,8 @@ Each stage is independent. Run them all or pick what you need.
 | Node.js 18+ | Auto-apply | Needed for `npx` to run Playwright MCP server |
 | Gemini API key | Scoring, tailoring, cover letters | Free tier (15 RPM / 1M tokens/day) is enough |
 | Chrome/Chromium | Auto-apply | Auto-detected on most systems |
-| Claude Code CLI | Auto-apply | Install from [claude.ai/code](https://claude.ai/code) |
+| Claude Code CLI | Auto-apply backend | Install from [claude.ai/code](https://claude.ai/code) |
+| OpenCode CLI | Auto-apply backend | Install from [opencode.ai/docs/cli](https://opencode.ai/docs/cli/) |
 
 **Gemini API key is free.** Get one at [aistudio.google.com](https://aistudio.google.com). OpenAI and local models (Ollama/llama.cpp) are also supported.
 
@@ -117,7 +118,7 @@ Your personal data in one structured file: contact info, work authorization, com
 Job search queries, target titles, locations, boards. Run multiple searches with different parameters.
 
 ### `.env`
-API keys and runtime config: `GEMINI_API_KEY`, `LLM_MODEL`, `CAPSOLVER_API_KEY` (optional), and optional human-review sync settings: `HUMAN_REVIEW_SCORE`, `GOOGLE_SHEETS_WEBHOOK_URL`, `GOOGLE_SHEETS_WEBHOOK_SECRET`.
+API keys and runtime config: `GEMINI_API_KEY`, `LLM_MODEL`, `APPLYPILOT_APPLY_BACKEND`, `CAPSOLVER_API_KEY` (optional), and optional human-review sync settings: `HUMAN_REVIEW_SCORE`, `GOOGLE_SHEETS_WEBHOOK_URL`, `GOOGLE_SHEETS_WEBHOOK_SECRET`.
 
 ### Package configs (shipped with ApplyPilot)
 - `config/employers.yaml` - Workday employer registry (48 preconfigured)
@@ -144,12 +145,14 @@ Generates a custom resume per job: reorders experience, emphasizes relevant skil
 Writes a targeted cover letter per job referencing the specific company, role, and how your experience maps to their requirements.
 
 ### Auto-Apply
-Claude Code launches a Chrome instance, navigates to each application page, detects the form type, fills personal information and work history, uploads your base resume, answers screening questions with AI, and submits. If a required cover letter appears, ApplyPilot stops automation, generates the letter, and moves the job to the human-review sheet for manual follow-up. A live dashboard shows progress in real-time.
+Claude Code or OpenCode launches a Chrome instance, navigates to each application page, detects the form type, fills personal information and work history, uploads your base resume, answers screening questions with AI, and submits. If a required cover letter appears, ApplyPilot stops automation, generates the letter, and moves the job to the human-review sheet for manual follow-up. A live dashboard shows progress in real-time.
+
+OpenCode runs in one-shot CLI mode with an ephemeral `OPENCODE_CONFIG` file generated per worker. Use provider/model syntax with `--backend opencode`, for example `anthropic/claude-sonnet-4-5`.
 
 The Playwright MCP server is configured automatically at runtime per worker. No manual MCP setup needed.
 
 ```bash
-# Utility modes (no Chrome/Claude needed)
+# Utility modes (no browser agent needed)
 applypilot apply --mark-applied URL    # manually mark a job as applied
 applypilot apply --mark-failed URL     # manually mark a job as failed
 applypilot apply --reset-failed        # reset all failed jobs for retry
@@ -173,6 +176,7 @@ applypilot run --validation strict      # Strictest validation (retries on any b
 applypilot run tailor                   # Optional manual resume tailoring
 applypilot run cover                    # Optional bulk cover-letter generation
 applypilot apply                        # Launch auto-apply
+applypilot apply --backend opencode     # Use OpenCode instead of Claude Code
 applypilot apply --workers 3            # Parallel browser workers
 applypilot sync-human-review            # Push 90+ jobs to Google Sheets
 applypilot apply --dry-run              # Fill forms without submitting

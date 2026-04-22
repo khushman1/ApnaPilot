@@ -172,6 +172,8 @@ DEFAULTS = {
     "google_sheets_timeout_sec": 10,
 }
 
+APPLY_BACKENDS = ("claude", "opencode")
+
 
 def get_int_env(name: str, default: int) -> int:
     """Read an integer environment variable with a safe fallback."""
@@ -188,6 +190,15 @@ def get_human_review_score() -> int:
     """Threshold at or above which jobs enter human review."""
     score = get_int_env("HUMAN_REVIEW_SCORE", DEFAULTS["human_review_score"])
     return max(1, min(100, score))
+
+
+def get_apply_backend(default: str = "claude") -> str:
+    """Default auto-apply backend from environment."""
+    backend = os.environ.get("APPLYPILOT_APPLY_BACKEND", default)
+    normalized = (backend or default).strip().lower()
+    if normalized in APPLY_BACKENDS:
+        return normalized
+    return default
 
 
 def load_env():
@@ -221,7 +232,7 @@ def get_tier() -> int:
 
     Tier 1 (Discovery):            Python + pip
     Tier 2 (AI Scoring & Tailoring): + LLM API key
-    Tier 3 (Full Auto-Apply):       + Claude Code CLI + Chrome
+    Tier 3 (Full Auto-Apply):       + Claude Code or OpenCode CLI + Chrome
     """
     load_env()
 
@@ -229,20 +240,19 @@ def get_tier() -> int:
     if not has_llm:
         return 1
 
-    has_claude = shutil.which("claude") is not None
     try:
         get_chrome_path()
         has_chrome = True
     except FileNotFoundError:
         has_chrome = False
 
-    if has_claude and has_chrome:
+    if any(shutil.which(candidate) for candidate in APPLY_BACKENDS) and has_chrome:
         return 3
 
     return 2
 
 
-def check_tier(required: int, feature: str) -> None:
+def check_tier(required: int, feature: str, backend: str | None = None) -> None:
     """Raise SystemExit with a clear message if the current tier is too low.
 
     Args:
@@ -260,8 +270,19 @@ def check_tier(required: int, feature: str) -> None:
     if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
         missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
-        if not shutil.which("claude"):
-            missing.append("Claude Code CLI — install from [bold]https://claude.ai/code[/bold]")
+        selected_backend = get_apply_backend(backend) if backend else None
+        if selected_backend:
+            executable = "claude" if selected_backend == "claude" else "opencode"
+            label = "Claude Code CLI" if selected_backend == "claude" else "OpenCode CLI"
+            install_hint = "https://claude.ai/code" if selected_backend == "claude" else "https://opencode.ai/docs/cli/"
+            if not shutil.which(executable):
+                missing.append(f"{label} — install from [bold]{install_hint}[/bold]")
+        elif not any(shutil.which(candidate) for candidate in ("claude", "opencode")):
+            labels = ", ".join(APPLY_BACKENDS)
+            missing.append(
+                "Auto-apply agent CLI — install Claude Code or OpenCode "
+                f"(supported backends: [bold]{labels}[/bold])"
+            )
         try:
             get_chrome_path()
         except FileNotFoundError:
