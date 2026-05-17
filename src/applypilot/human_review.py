@@ -177,6 +177,7 @@ def sync_human_review_jobs(
             json=payload,
             headers={"X-ApplyPilot-Secret": secret} if secret else None,
             timeout=timeout,
+            follow_redirects=True,
         )
         response.raise_for_status()
     except Exception as exc:
