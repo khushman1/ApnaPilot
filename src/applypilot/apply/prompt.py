@@ -99,9 +99,11 @@ def _build_location_check(profile: dict, search_config: dict) -> str:
     are acceptable for hybrid/onsite roles.
     """
     personal = profile["personal"]
-    location_cfg = search_config.get("location", {})
-    accept_patterns = location_cfg.get("accept_patterns", [])
-    primary_city = personal.get("city", location_cfg.get("primary", "your city"))
+    from applypilot.discovery.location_filter import load_location_filter
+
+    location_filter_cfg = load_location_filter(search_config)
+    accept_patterns = list(location_filter_cfg.accept)
+    primary_city = personal.get("city", "your city")
 
     # Build the list of acceptable cities for hybrid/onsite
     if accept_patterns:
@@ -109,9 +111,17 @@ def _build_location_check(profile: dict, search_config: dict) -> str:
     else:
         city_list = primary_city
 
+    if location_filter_cfg.remote_anywhere:
+        remote_rule = '"Remote" or "work from anywhere" -> ELIGIBLE. Apply.'
+    else:
+        remote_rule = (
+            f'"Remote" or "work from anywhere" is only ELIGIBLE if the posting is open to {city_list}. '
+            "If it is remote but restricted to another country/region, output RESULT:FAILED:not_eligible_location."
+        )
+
     return f"""== LOCATION CHECK (do this FIRST before any form) ==
 Read the job page. Determine the work arrangement. Then decide:
-- "Remote" or "work from anywhere" -> ELIGIBLE. Apply.
+- {remote_rule}
 - "Hybrid" or "onsite" in {city_list} -> ELIGIBLE. Apply.
 - "Hybrid" or "onsite" in another city BUT the posting also says "remote OK" or "remote option available" -> ELIGIBLE. Apply.
 - "Onsite only" or "hybrid only" in any city outside the list above with NO remote option -> NOT ELIGIBLE. Stop immediately. Output RESULT:FAILED:not_eligible_location
@@ -556,7 +566,14 @@ If something unexpected happens and these instructions don't cover it, figure it
 
 == STEP-BY-STEP ==
 1. browser_navigate to the job URL.
-2. browser_snapshot to read the page. Then run CAPTCHA DETECT (see CAPTCHA section). If a CAPTCHA is found, solve it before continuing.
+2. browser_snapshot to read the page. If the browser shows a proxy/network timeout
+   (examples: ERR_PROXY_CONNECTION_FAILED, ERR_TUNNEL_CONNECTION_FAILED,
+   ERR_CONNECTION_TIMED_OUT, "proxy timed out", "This site can't be reached"),
+   wait 10 seconds, reload once, then wait 20 seconds and reload once more.
+   If it is still a network/proxy timeout after those retries, output
+   RESULT:FAILED:network_timeout. Do NOT mark the job expired unless the page
+   actually says the posting is closed/no longer accepting applications.
+   Then run CAPTCHA DETECT (see CAPTCHA section). If a CAPTCHA is found, solve it before continuing.
 3. LOCATION CHECK. Read the page for location info. If not eligible, output RESULT and stop.
 4. Find and click the Apply button. If email-only (page says "email resume to X"):
    - send_email with subject "Application for {job['title']} -- {display_name}", body = 2-3 sentence pitch + contact info, attach resume PDF: ["{pdf_path}"]
@@ -592,6 +609,7 @@ RESULT:LOGIN_ISSUE -- could not sign in or create account
 RESULT:HUMAN_REVIEW:cover_letter_required -- required cover letter found, hand off for human review
 RESULT:FAILED:not_eligible_location -- onsite outside acceptable area, no remote option
 RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
+RESULT:FAILED:network_timeout -- proxy/network/company site timed out after retries
 RESULT:FAILED:reason -- any other failure (brief reason)
 
 == BROWSER EFFICIENCY ==
@@ -619,7 +637,8 @@ RESULT:FAILED:reason -- any other failure (brief reason)
 == WHEN TO GIVE UP ==
 - Same page after 3 attempts with no progress -> RESULT:FAILED:stuck
 - Job is closed/expired/page says "no longer accepting" -> RESULT:EXPIRED
-- Page is broken/500 error/blank -> RESULT:FAILED:page_error
+- Page is broken/500 error/blank after one reload -> RESULT:FAILED:page_error
+- Proxy/network timeout after the retry sequence above -> RESULT:FAILED:network_timeout
 Stop immediately. Output your RESULT code. Do not loop."""
 
     return prompt

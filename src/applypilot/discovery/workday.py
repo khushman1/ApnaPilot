@@ -22,6 +22,7 @@ import yaml
 from applypilot import config
 from applypilot.config import CONFIG_DIR
 from applypilot.database import get_connection, init_db
+from applypilot.discovery.location_filter import LocationFilter, load_location_filter, location_ok
 
 log = logging.getLogger(__name__)
 
@@ -40,35 +41,17 @@ def load_employers() -> dict:
 
 # -- Location filtering from search config -----------------------------------
 
-def _load_location_filter(search_cfg: dict | None = None):
+def _load_location_filter(search_cfg: dict | None = None) -> LocationFilter:
     """Load location accept/reject lists from search config."""
     if search_cfg is None:
         search_cfg = config.load_search_config()
 
-    accept = search_cfg.get("location_accept", [])
-    reject = search_cfg.get("location_reject_non_remote", [])
-    return accept, reject
+    return load_location_filter(search_cfg)
 
 
-def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
+def _location_ok(location: str | None, filt: LocationFilter) -> bool:
     """Check if a job location passes the user's location filter."""
-    if not location:
-        return True
-
-    loc = location.lower()
-
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    for r in reject:
-        if r.lower() in loc:
-            return False
-
-    for a in accept:
-        if a.lower() in loc:
-            return True
-
-    return False
+    return location_ok(location, filt)
 
 
 # -- HTML stripper -----------------------------------------------------------
@@ -192,8 +175,7 @@ def search_employer(
     search_text: str,
     location_filter: bool = True,
     max_results: int = 0,
-    accept_locs: list[str] | None = None,
-    reject_locs: list[str] | None = None,
+    location_filter_cfg: LocationFilter | None = None,
 ) -> list[dict]:
     """Search an employer, paginate through all results, optionally filter by location."""
     log.info("%s: searching \"%s\"...", employer["name"], search_text)
@@ -221,8 +203,8 @@ def search_employer(
 
         for j in postings:
             loc = j.get("locationsText", "")
-            if location_filter and accept_locs is not None and reject_locs is not None:
-                if not _location_ok(loc, accept_locs, reject_locs):
+            if location_filter and location_filter_cfg is not None:
+                if not _location_ok(loc, location_filter_cfg):
                     continue
 
             all_jobs.append({
@@ -345,8 +327,7 @@ def _process_one(
     employers: dict,
     search_text: str,
     location_filter: bool,
-    accept_locs: list[str],
-    reject_locs: list[str],
+    location_filter_cfg: LocationFilter,
 ) -> dict:
     """Search one employer, fetch details, store results."""
     emp = employers[employer_key]
@@ -355,8 +336,7 @@ def _process_one(
         jobs = search_employer(
             employer_key, emp, search_text,
             location_filter=location_filter,
-            accept_locs=accept_locs,
-            reject_locs=reject_locs,
+            location_filter_cfg=location_filter_cfg,
         )
     except Exception as e:
         log.error("%s: ERROR searching '%s': %s", emp["name"], search_text, e)
@@ -388,8 +368,7 @@ def scrape_employers(
     employer_keys: list[str] | None = None,
     location_filter: bool = True,
     max_results: int = 0,
-    accept_locs: list[str] | None = None,
-    reject_locs: list[str] | None = None,
+    location_filter_cfg: LocationFilter | None = None,
     workers: int = 1,
 ) -> dict:
     """Run full scrape: search -> filter -> detail -> store.
@@ -400,10 +379,8 @@ def scrape_employers(
     if employer_keys is None:
         employer_keys = list(employers.keys())
 
-    if accept_locs is None:
-        accept_locs = []
-    if reject_locs is None:
-        reject_locs = []
+    if location_filter_cfg is None:
+        location_filter_cfg = _load_location_filter()
 
     # Ensure DB schema
     init_db()
@@ -423,7 +400,7 @@ def scrape_employers(
             futures = {
                 pool.submit(
                     _process_one, key, employers, search_text,
-                    location_filter, accept_locs, reject_locs,
+                    location_filter, location_filter_cfg,
                 ): key
                 for key in valid_keys
             }
@@ -446,7 +423,7 @@ def scrape_employers(
         for key in valid_keys:
             result = _process_one(
                 key, employers, search_text,
-                location_filter, accept_locs, reject_locs,
+                location_filter, location_filter_cfg,
             )
             completed += 1
             total_new += result["new"]
@@ -492,7 +469,7 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
 
     search_cfg = config.load_search_config()
     queries_cfg = search_cfg.get("queries", [])
-    accept_locs, reject_locs = _load_location_filter(search_cfg)
+    location_filter_cfg = _load_location_filter(search_cfg)
 
     # Default to tier 1-2 queries for workday scraping
     max_tier = search_cfg.get("workday_max_tier", 2)
@@ -524,8 +501,7 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
             search_text=query,
             employers=employers,
             location_filter=location_filter,
-            accept_locs=accept_locs,
-            reject_locs=reject_locs,
+            location_filter_cfg=location_filter_cfg,
             workers=workers,
         )
         grand_new += result["new"]

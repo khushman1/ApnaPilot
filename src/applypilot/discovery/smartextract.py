@@ -31,6 +31,7 @@ from playwright.sync_api import sync_playwright
 from applypilot import config
 from applypilot.config import CONFIG_DIR
 from applypilot.database import get_connection, init_db, store_jobs, get_stats
+from applypilot.discovery.location_filter import LocationFilter, load_location_filter, location_ok
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -48,29 +49,16 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 # -- Location filtering -------------------------------------------------------
 
-def _load_location_filter(search_cfg: dict | None = None):
+def _load_location_filter(search_cfg: dict | None = None) -> LocationFilter:
     """Load location accept/reject lists from search config."""
     if search_cfg is None:
         search_cfg = config.load_search_config()
-    accept = search_cfg.get("location_accept", [])
-    reject = search_cfg.get("location_reject_non_remote", [])
-    return accept, reject
+    return load_location_filter(search_cfg)
 
 
-def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
+def _location_ok(location: str | None, filt: LocationFilter) -> bool:
     """Check if a job location passes the user's location filter."""
-    if not location:
-        return True
-    loc = location.lower()
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-    for r in reject:
-        if r.lower() in loc:
-            return False
-    for a in accept:
-        if a.lower() in loc:
-            return True
-    return False
+    return location_ok(location, filt)
 
 
 # -- Site configuration from YAML --------------------------------------------
@@ -90,8 +78,7 @@ def _store_jobs_filtered(
     jobs: list[dict],
     site: str,
     strategy: str,
-    accept_locs: list[str],
-    reject_locs: list[str],
+    location_filter_cfg: LocationFilter,
 ) -> tuple[int, int]:
     """Store jobs with location filtering. Returns (new, existing)."""
     now = datetime.now(timezone.utc).isoformat()
@@ -103,7 +90,7 @@ def _store_jobs_filtered(
         url = job.get("url")
         if not url:
             continue
-        if not _location_ok(job.get("location"), accept_locs, reject_locs):
+        if not _location_ok(job.get("location"), location_filter_cfg):
             filtered += 1
             continue
         try:
@@ -1014,8 +1001,7 @@ def build_scrape_targets(
 
 def _run_all(
     targets: list[dict],
-    accept_locs: list[str],
-    reject_locs: list[str],
+    location_filter_cfg: LocationFilter,
     workers: int = 1,
 ) -> dict:
     """Run smart extract on all targets.
@@ -1038,7 +1024,7 @@ def _run_all(
         if jobs:
             new, existing = _store_jobs_filtered(conn, jobs, target["name"],
                                                   r.get("strategy", "?"),
-                                                  accept_locs, reject_locs)
+                                                  location_filter_cfg)
             total_new += new
             total_existing += existing
             log.info("DB: +%d new, %d already existed", new, existing)
@@ -1102,7 +1088,7 @@ def run_smart_extract(
         Dict with stats: total_new, total_existing, passed, total.
     """
     search_cfg = config.load_search_config()
-    accept_locs, reject_locs = _load_location_filter(search_cfg)
+    location_filter_cfg = _load_location_filter(search_cfg)
 
     targets = build_scrape_targets(sites=sites, search_cfg=search_cfg)
 
@@ -1115,4 +1101,4 @@ def run_smart_extract(
     log.info("Sites: %d searchable, %d static | Total targets: %d (workers=%d)",
              search_sites, static_sites, len(targets), workers)
 
-    return _run_all(targets, accept_locs, reject_locs, workers=workers)
+    return _run_all(targets, location_filter_cfg, workers=workers)

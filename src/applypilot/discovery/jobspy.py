@@ -8,6 +8,7 @@ search configuration YAML (searches.yaml) rather than being hardcoded.
 """
 
 import logging
+import os
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from jobspy import scrape_jobs
 
 from applypilot import config
 from applypilot.database import get_connection, init_db, store_jobs
+from applypilot.discovery.location_filter import LocationFilter, load_location_filter, location_ok
 
 log = logging.getLogger(__name__)
 
@@ -76,43 +78,21 @@ def _scrape_with_retry(kwargs: dict, max_retries: int = 2, backoff: float = 5.0)
 
 # -- Location filtering ------------------------------------------------------
 
-def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
+def _load_location_config(search_cfg: dict) -> LocationFilter:
     """Extract accept/reject location lists from search config.
 
     Falls back to sensible defaults if not defined in the YAML.
     """
-    accept = search_cfg.get("location_accept", [])
-    reject = search_cfg.get("location_reject_non_remote", [])
-    return accept, reject
+    return load_location_filter(search_cfg)
 
 
-def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
+def _location_ok(location: str | None, filt: LocationFilter) -> bool:
     """Check if a job location passes the user's location filter.
 
-    Remote jobs are always accepted. Non-remote jobs must match an accept
-    pattern and not match a reject pattern.
+    Remote jobs are only accepted globally when remote_anywhere is enabled.
+    Otherwise they must still match an accept pattern such as India or APAC.
     """
-    if not location:
-        return True  # unknown location -- keep it, let scorer decide
-
-    loc = location.lower()
-
-    # Remote jobs always OK
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    # Reject non-remote matches
-    for r in reject:
-        if r.lower() in loc:
-            return False
-
-    # Accept matches
-    for a in accept:
-        if a.lower() in loc:
-            return True
-
-    # No match -- reject unknown
-    return False
+    return location_ok(location, filt)
 
 
 # -- DB storage (JobSpy DataFrame -> SQLite) ---------------------------------
@@ -192,8 +172,7 @@ def _run_one_search(
     proxy_config: dict | None,
     defaults: dict,
     max_retries: int,
-    accept_locs: list[str],
-    reject_locs: list[str],
+    location_filter: LocationFilter,
     glassdoor_map: dict,
 ) -> dict:
     """Run a single search query and store results in DB."""
@@ -209,29 +188,30 @@ def _run_one_search(
 
     all_dfs = []
 
-    # Run non-Glassdoor sites with original location
-    if other_sites:
+    # Run non-Glassdoor sites one at a time. Some boards, especially
+    # ZipRecruiter, can 403 independently; keep the other boards productive.
+    for site in other_sites:
         kwargs = {
-            "site_name": other_sites,
+            "site_name": [site],
             "search_term": s["query"],
             "location": s["location"],
             "results_wanted": results_per_site,
             "hours_old": hours_old,
             "description_format": "markdown",
-            "country_indeed": defaults.get("country_indeed", "usa"),
+            "country_indeed": defaults.get("country_indeed", defaults.get("country", "usa")),
             "verbose": 0,
         }
         if s.get("remote"):
             kwargs["is_remote"] = True
         if proxy_config:
             kwargs["proxies"] = [proxy_config["jobspy"]]
-        if "linkedin" in other_sites:
+        if site == "linkedin":
             kwargs["linkedin_fetch_description"] = True
         try:
             df = _scrape_with_retry(kwargs, max_retries=max_retries)
             all_dfs.append(df)
         except Exception as e:
-            log.error("[%s] (non-gd): %s", label, e)
+            log.error("[%s] (%s): %s", label, site, e)
 
     # Run Glassdoor separately with simplified location
     if has_glassdoor:
@@ -272,7 +252,7 @@ def _run_one_search(
     before = len(df)
     df = df[df.apply(lambda row: _location_ok(
         str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None,
-        accept_locs, reject_locs,
+        location_filter,
     ), axis=1)]
     filtered = before - len(df)
 
@@ -375,8 +355,9 @@ def _full_crawl(
     queries = search_cfg.get("queries", [])
     locs = search_cfg.get("locations", [])
     defaults = search_cfg.get("defaults", {})
+    defaults["country"] = search_cfg.get("country", defaults.get("country", "usa"))
     glassdoor_map = search_cfg.get("glassdoor_location_map", {})
-    accept_locs, reject_locs = _load_location_config(search_cfg)
+    location_filter = _load_location_config(search_cfg)
 
     if tiers:
         queries = [q for q in queries if q.get("tier") in tiers]
@@ -411,7 +392,7 @@ def _full_crawl(
         result = _run_one_search(
             s, sites, results_per_site, hours_old,
             proxy_config, defaults, max_retries,
-            accept_locs, reject_locs, glassdoor_map,
+            location_filter, glassdoor_map,
         )
         completed += 1
         total_new += result["new"]
@@ -460,8 +441,8 @@ def run_discovery(cfg: dict | None = None) -> dict:
         log.warning("No search configuration found. Run `applypilot init` to create one.")
         return {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
 
-    proxy = cfg.get("proxy")
-    sites = cfg.get("sites")
+    proxy = cfg.get("proxy") or os.environ.get("PROXY")
+    sites = cfg.get("sites") or cfg.get("boards")
     results_per_site = cfg.get("defaults", {}).get("results_per_site", 100)
     hours_old = cfg.get("defaults", {}).get("hours_old", 72)
     tiers = cfg.get("tiers")

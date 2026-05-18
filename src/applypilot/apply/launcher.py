@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rich.console import Console
@@ -74,6 +74,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 70,
     Returns:
         Job dict or None if the queue is empty.
     """
+    release_stale_locks()
     conn = get_connection()
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -187,6 +188,32 @@ def release_lock(url: str) -> None:
         (url,),
     )
     conn.commit()
+
+
+def release_stale_locks(max_age_seconds: int | None = None) -> int:
+    """Release old in-progress locks left behind by killed apply runs."""
+    if max_age_seconds is None:
+        max_age_seconds = config.get_int_env(
+            "APPLYPILOT_LOCK_TIMEOUT",
+            max(config.DEFAULTS["apply_timeout"] * 2, 900),
+        )
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
+    conn = get_connection()
+    cursor = conn.execute(
+        """
+        UPDATE jobs
+        SET apply_status = NULL,
+            agent_id = NULL,
+            apply_error = COALESCE(apply_error, 'released stale in_progress lock')
+        WHERE apply_status = 'in_progress'
+          AND (last_attempted_at IS NULL OR last_attempted_at < ?)
+        """,
+        (cutoff,),
+    )
+    conn.commit()
+    if cursor.rowcount:
+        logger.warning("Released %d stale in-progress apply lock(s).", cursor.rowcount)
+    return cursor.rowcount
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +496,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     start = time.time()
     stats: dict = {}
     proc = None
+    apply_timeout = config.get_int_env("APPLYPILOT_APPLY_TIMEOUT", config.DEFAULTS["apply_timeout"])
 
     try:
         proc = subprocess.Popen(
@@ -492,34 +520,51 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             proc.stdin.close()
 
         text_parts: list[str] = []
-        with open(worker_log, "a", encoding="utf-8") as lf:
-            lf.write(log_header)
+        output_lock = threading.Lock()
 
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                    event_strings, usage = _extract_backend_text(backend, msg)
-                    for event_text in event_strings:
-                        text_parts.append(event_text)
-                        lf.write(event_text + "\n")
-                    if usage:
-                        stats = usage
-                    desc = _extract_event_action(backend, msg)
-                    if desc:
-                        lf.write(f"  >> {desc}\n")
-                        ws = get_state(worker_id)
-                        cur_actions = ws.actions if ws else 0
-                        update_state(worker_id,
-                                     actions=cur_actions + 1,
-                                     last_action=desc[:35])
-                except json.JSONDecodeError:
-                    text_parts.append(line)
-                    lf.write(line + "\n")
+        def _read_output() -> None:
+            nonlocal stats
+            if proc is None or proc.stdout is None:
+                return
+            with open(worker_log, "a", encoding="utf-8") as lf:
+                lf.write(log_header)
 
-        proc.wait(timeout=300)
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                        event_strings, usage = _extract_backend_text(backend, msg)
+                        with output_lock:
+                            for event_text in event_strings:
+                                text_parts.append(event_text)
+                                lf.write(event_text + "\n")
+                            if usage:
+                                stats = usage
+                        desc = _extract_event_action(backend, msg)
+                        if desc:
+                            lf.write(f"  >> {desc}\n")
+                            ws = get_state(worker_id)
+                            cur_actions = ws.actions if ws else 0
+                            update_state(worker_id,
+                                         actions=cur_actions + 1,
+                                         last_action=desc[:35])
+                    except json.JSONDecodeError:
+                        with output_lock:
+                            text_parts.append(line)
+                            lf.write(line + "\n")
+
+        reader = threading.Thread(target=_read_output, daemon=True)
+        reader.start()
+
+        while proc.poll() is None:
+            elapsed = time.time() - start
+            if elapsed > apply_timeout:
+                raise subprocess.TimeoutExpired(cmd, timeout=apply_timeout)
+            time.sleep(1)
+
+        reader.join(timeout=5)
         returncode = proc.returncode
         proc = None
 
@@ -527,7 +572,8 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         if returncode and returncode < 0:
             return "skipped", duration_ms
 
-        output = "\n".join(text_parts)
+        with output_lock:
+            output = "\n".join(text_parts)
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         job_log = config.LOG_DIR / f"{backend}_{ts}_w{worker_id}_{job.get('site', 'unknown')[:20]}.txt"
@@ -546,6 +592,8 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         elapsed = int(time.time() - start)
         add_event(f"[W{worker_id}] TIMEOUT ({elapsed}s)")
         update_state(worker_id, status="failed", last_action=f"TIMEOUT ({elapsed}s)")
+        if proc is not None and proc.poll() is None:
+            _kill_process_tree(proc.pid)
         return "failed:timeout", duration_ms
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
