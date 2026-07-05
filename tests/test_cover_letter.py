@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from applypilot.scoring.cover_letter import _build_cover_letter_prompt, _strip_preamble
 

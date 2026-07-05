@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
-from pathlib import Path
 
-import pytest
 
 from applypilot import database
 from applypilot.database import get_connection, get_jobs_by_stage, init_db, store_jobs

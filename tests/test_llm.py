@@ -5,8 +5,6 @@ from __future__ import annotations
 import pytest
 
 from applypilot.llm import (
-    _GEMINI_COMPAT_BASE,
-    _GEMINI_NATIVE_BASE,
     LLMClient,
     _detect_provider,
     get_client,
