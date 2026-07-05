@@ -31,18 +31,11 @@ def generate_dashboard(output_path: str | None = None) -> str:
         "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND application_url IS NOT NULL"
     ).fetchone()[0]
     scored = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL").fetchone()[0]
-    human_review = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score >= 90"
-    ).fetchone()[0]
-    auto_eligible = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score BETWEEN 70 AND 89"
-    ).fetchone()[0]
-    skipped = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL AND fit_score < 70"
-    ).fetchone()[0]
+    human_review = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score >= 90").fetchone()[0]
+    auto_eligible = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score BETWEEN 70 AND 89").fetchone()[0]
+    skipped = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL AND fit_score < 70").fetchone()[0]
     synced = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
-        "AND human_review_synced_at IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 AND human_review_synced_at IS NOT NULL"
     ).fetchone()[0]
 
     site_stats = conn.execute(
@@ -101,10 +94,10 @@ def generate_dashboard(output_path: str | None = None) -> str:
         site_rows += f"""
         <div class="site-row">
           <div class="site-name" style="color:{color}">{escape(site)}</div>
-          <div class="site-nums">{row['total']} jobs &middot; {row['human_review']} human review &middot; {row['auto_eligible']} auto-eligible &middot; avg {row['avg_score'] or 0}</div>
+          <div class="site-nums">{row["total"]} jobs &middot; {row["human_review"]} human review &middot; {row["auto_eligible"]} auto-eligible &middot; avg {row["avg_score"] or 0}</div>
           <div class="bar-track">
-            <div class="bar-fill" style="width:{row['human_review']/max(row['total'],1)*100:.1f}%;background:#f97316"></div>
-            <div class="bar-fill" style="width:{row['auto_eligible']/max(row['total'],1)*100:.1f}%;background:#10b981"></div>
+            <div class="bar-fill" style="width:{row["human_review"] / max(row["total"], 1) * 100:.1f}%;background:#f97316"></div>
+            <div class="bar-fill" style="width:{row["auto_eligible"] / max(row["total"], 1) * 100:.1f}%;background:#10b981"></div>
           </div>
         </div>"""
 
@@ -149,9 +142,9 @@ def generate_dashboard(output_path: str | None = None) -> str:
             <span class="score-pill" style="background:{bucket_color}">{score}</span>
             <a href="{job_url}" class="job-title" target="_blank">{title}</a>
           </div>
-          <div class="meta-row">{''.join(meta_parts)}</div>
-          {f'<div class="keywords-row">{escape(keywords)}</div>' if keywords else ''}
-          {f'<div class="reasoning-row">{escape(reasoning)}</div>' if reasoning else ''}
+          <div class="meta-row">{"".join(meta_parts)}</div>
+          {f'<div class="keywords-row">{escape(keywords)}</div>' if keywords else ""}
+          {f'<div class="reasoning-row">{escape(reasoning)}</div>' if reasoning else ""}
           <p class="desc-preview">{desc_preview}...</p>
           <div class="card-footer">{apply_link}</div>
         </div>"""
@@ -165,12 +158,12 @@ def generate_dashboard(output_path: str | None = None) -> str:
         meta = section_meta[bucket_id]
         job_sections += f"""
         <section class="bucket-section" data-section="{bucket_id}">
-          <h2 class="score-header" style="border-color:{meta['color']}">
-            <span class="score-badge" style="background:{meta['color']}">{len(cards)}</span>
-            {meta['label']}
+          <h2 class="score-header" style="border-color:{meta["color"]}">
+            <span class="score-badge" style="background:{meta["color"]}">{len(cards)}</span>
+            {meta["label"]}
           </h2>
           <div class="job-grid">
-            {''.join(cards)}
+            {"".join(cards)}
           </div>
         </section>"""
 

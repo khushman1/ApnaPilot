@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 # Provider detection
 # ---------------------------------------------------------------------------
 
+
 def _detect_provider() -> tuple[str, str, str]:
     """Return (base_url, model, api_key) based on environment variables.
 
@@ -54,8 +55,7 @@ def _detect_provider() -> tuple[str, str, str]:
         )
 
     raise RuntimeError(
-        "No LLM provider configured. "
-        "Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
+        "No LLM provider configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
     )
 
 
@@ -207,7 +207,7 @@ class LLMClient:
 
                 return self._chat_compat(messages, temperature, max_tokens)
 
-            except _GeminiCompatForbidden as exc:
+            except _GeminiCompatForbidden:
                 # Model not available on OpenAI-compat layer — switch to native.
                 log.warning(
                     "Gemini compat endpoint returned 403 for model '%s'. "
@@ -230,23 +230,23 @@ class LLMClient:
                 resp = exc.response
                 if resp.status_code in (429, 503) and attempt < _MAX_RETRIES - 1:
                     # Respect Retry-After header if provided (Gemini sends this).
-                    retry_after = (
-                        resp.headers.get("Retry-After")
-                        or resp.headers.get("X-RateLimit-Reset-Requests")
-                    )
+                    retry_after = resp.headers.get("Retry-After") or resp.headers.get("X-RateLimit-Reset-Requests")
                     if retry_after:
                         try:
                             wait = float(retry_after)
                         except (ValueError, TypeError):
-                            wait = _RATE_LIMIT_BASE_WAIT * (2 ** attempt)
+                            wait = _RATE_LIMIT_BASE_WAIT * (2**attempt)
                     else:
-                        wait = min(_RATE_LIMIT_BASE_WAIT * (2 ** attempt), 60)
+                        wait = min(_RATE_LIMIT_BASE_WAIT * (2**attempt), 60)
 
                     log.warning(
                         "LLM rate limited (HTTP %s). Waiting %ds before retry %d/%d. "
                         "Tip: Gemini free tier = 15 RPM. Consider a paid account "
                         "or switching to a local model.",
-                        resp.status_code, wait, attempt + 1, _MAX_RETRIES,
+                        resp.status_code,
+                        wait,
+                        attempt + 1,
+                        _MAX_RETRIES,
                     )
                     time.sleep(wait)
                     continue
@@ -254,10 +254,12 @@ class LLMClient:
 
             except httpx.TimeoutException:
                 if attempt < _MAX_RETRIES - 1:
-                    wait = min(_RATE_LIMIT_BASE_WAIT * (2 ** attempt), 60)
+                    wait = min(_RATE_LIMIT_BASE_WAIT * (2**attempt), 60)
                     log.warning(
                         "LLM request timed out, retrying in %ds (attempt %d/%d)",
-                        wait, attempt + 1, _MAX_RETRIES,
+                        wait,
+                        attempt + 1,
+                        _MAX_RETRIES,
                     )
                     time.sleep(wait)
                     continue
@@ -275,6 +277,7 @@ class LLMClient:
 
 class _GeminiCompatForbidden(Exception):
     """Sentinel: Gemini OpenAI-compat returned 403. Switch to native API."""
+
     def __init__(self, response: httpx.Response) -> None:
         self.response = response
         super().__init__(f"Gemini compat 403: {response.text[:200]}")

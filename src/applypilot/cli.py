@@ -33,6 +33,7 @@ VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _bootstrap() -> None:
     """Common setup: load env, create dirs, init DB."""
     from applypilot.config import load_env, ensure_dirs
@@ -53,10 +54,13 @@ def _version_callback(value: bool) -> None:
 # Commands
 # ---------------------------------------------------------------------------
 
+
 @app.callback()
 def main(
     version: bool = typer.Option(
-        False, "--version", "-V",
+        False,
+        "--version",
+        "-V",
         help="Show version and exit.",
         callback=_version_callback,
         is_eager=True,
@@ -108,25 +112,20 @@ def run(
     # Validate stage names
     for s in stage_list:
         if s != "all" and s not in VALID_STAGES:
-            console.print(
-                f"[red]Unknown stage:[/red] '{s}'. "
-                f"Valid stages: {', '.join(VALID_STAGES)}, all"
-            )
+            console.print(f"[red]Unknown stage:[/red] '{s}'. Valid stages: {', '.join(VALID_STAGES)}, all")
             raise typer.Exit(code=1)
 
     # Gate AI stages behind Tier 2
     llm_stages = {"score", "tailor", "cover"}
     if any(s in stage_list for s in llm_stages) or "all" in stage_list:
         from applypilot.config import check_tier
+
         check_tier(2, "AI scoring/tailoring")
 
     # Validate the --validation flag value
     valid_modes = ("strict", "normal", "lenient")
     if validation not in valid_modes:
-        console.print(
-            f"[red]Invalid --validation value:[/red] '{validation}'. "
-            f"Choose from: {', '.join(valid_modes)}"
-        )
+        console.print(f"[red]Invalid --validation value:[/red] '{validation}'. Choose from: {', '.join(valid_modes)}")
         raise typer.Exit(code=1)
 
     result = run_pipeline(
@@ -155,7 +154,9 @@ def apply(
     url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
     gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
-    mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
+    mark_failed: Optional[str] = typer.Option(
+        None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."
+    ),
     fail_reason: Optional[str] = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
     reset_failed: bool = typer.Option(False, "--reset-failed", help="Reset all failed jobs for retry."),
 ) -> None:
@@ -184,18 +185,21 @@ def apply(
 
     if mark_applied:
         from applypilot.apply.launcher import mark_job
+
         mark_job(mark_applied, "applied")
         console.print(f"[green]Marked as applied:[/green] {mark_applied}")
         return
 
     if mark_failed:
         from applypilot.apply.launcher import mark_job
+
         mark_job(mark_failed, "failed", reason=fail_reason)
         console.print(f"[yellow]Marked as failed:[/yellow] {mark_failed} ({fail_reason or 'manual'})")
         return
 
     if reset_failed:
         from applypilot.apply.launcher import reset_failed as do_reset
+
         count = do_reset()
         console.print(f"[green]Reset {count} failed job(s) for retry.[/green]")
         return
@@ -207,10 +211,7 @@ def apply(
 
     # Check 2: Profile exists
     if not _profile_path.exists():
-        console.print(
-            "[red]Profile not found.[/red]\n"
-            "Run [bold]applypilot init[/bold] to create your profile first."
-        )
+        console.print("[red]Profile not found.[/red]\nRun [bold]applypilot init[/bold] to create your profile first.")
         raise typer.Exit(code=1)
 
     # Check 3: There are auto-eligible jobs available (skip for --gen with --url)
@@ -232,7 +233,8 @@ def apply(
 
     if gen:
         from applypilot.apply.agent_backends import config_filename
-        from applypilot.apply.launcher import gen_prompt, BASE_CDP_PORT
+        from applypilot.apply.launcher import gen_prompt
+
         target = url or ""
         if not target:
             console.print("[red]--gen requires --url to specify which job.[/red]")
@@ -243,7 +245,7 @@ def apply(
             raise typer.Exit(code=1)
         runtime_config_path = _profile_path.parent / config_filename(selected_backend, 0)
         console.print(f"[green]Wrote prompt to:[/green] {prompt_file}")
-        console.print(f"\n[bold]Run manually:[/bold]")
+        console.print("\n[bold]Run manually:[/bold]")
         console.print(f"  {render_manual_command(selected_backend, selected_model, prompt_file, runtime_config_path)}")
         return
 
@@ -387,8 +389,12 @@ def doctor() -> None:
     """Check your setup and diagnose missing requirements."""
     import shutil
     from applypilot.config import (
-        load_env, PROFILE_PATH, RESUME_PATH, RESUME_PDF_PATH,
-        SEARCH_CONFIG_PATH, ENV_PATH, get_chrome_path,
+        load_env,
+        PROFILE_PATH,
+        RESUME_PATH,
+        RESUME_PDF_PATH,
+        SEARCH_CONFIG_PATH,
+        get_chrome_path,
     )
 
     load_env()
@@ -423,13 +429,20 @@ def doctor() -> None:
     # jobspy (discovery dep installed separately)
     try:
         import jobspy  # noqa: F401
+
         results.append(("python-jobspy", ok_mark, "Job board scraping available"))
     except ImportError:
-        results.append(("python-jobspy", warn_mark,
-                        "pip install --no-deps python-jobspy && pip install pydantic tls-client requests markdownify regex"))
+        results.append(
+            (
+                "python-jobspy",
+                warn_mark,
+                "pip install --no-deps python-jobspy && pip install pydantic tls-client requests markdownify regex",
+            )
+        )
 
     # --- Tier 2 checks ---
     import os
+
     has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
     has_openai = bool(os.environ.get("OPENAI_API_KEY"))
     has_local = bool(os.environ.get("LLM_URL"))
@@ -442,8 +455,7 @@ def doctor() -> None:
     elif has_local:
         results.append(("LLM API key", ok_mark, f"Local: {os.environ.get('LLM_URL')}"))
     else:
-        results.append(("LLM API key", fail_mark,
-                        "Set GEMINI_API_KEY in ~/.applypilot/.env (run 'applypilot init')"))
+        results.append(("LLM API key", fail_mark, "Set GEMINI_API_KEY in ~/.applypilot/.env (run 'applypilot init')"))
 
     if os.environ.get("GOOGLE_SHEETS_WEBHOOK_URL"):
         results.append(("Human review webhook", ok_mark, "Google Sheets webhook configured"))
@@ -459,38 +471,41 @@ def doctor() -> None:
     if claude_bin:
         results.append(("Claude Code CLI", ok_mark, claude_bin))
     else:
-        results.append(("Claude Code CLI", alt_mark,
-                        "Install from https://claude.ai/code (optional auto-apply backend)"))
+        results.append(
+            ("Claude Code CLI", alt_mark, "Install from https://claude.ai/code (optional auto-apply backend)")
+        )
 
     if opencode_bin:
         results.append(("OpenCode CLI", ok_mark, opencode_bin))
     else:
-        results.append(("OpenCode CLI", alt_mark,
-                        "Install from https://opencode.ai/docs/cli/ (optional auto-apply backend)"))
+        results.append(
+            ("OpenCode CLI", alt_mark, "Install from https://opencode.ai/docs/cli/ (optional auto-apply backend)")
+        )
 
     # Chrome
     try:
         chrome_path = get_chrome_path()
         results.append(("Chrome/Chromium", ok_mark, chrome_path))
     except FileNotFoundError:
-        results.append(("Chrome/Chromium", fail_mark,
-                        "Install Chrome or set CHROME_PATH env var (needed for auto-apply)"))
+        results.append(
+            ("Chrome/Chromium", fail_mark, "Install Chrome or set CHROME_PATH env var (needed for auto-apply)")
+        )
 
     # Node.js / npx (for Playwright MCP)
     npx_bin = shutil.which("npx")
     if npx_bin:
         results.append(("Node.js (npx)", ok_mark, npx_bin))
     else:
-        results.append(("Node.js (npx)", fail_mark,
-                        "Install Node.js 18+ from nodejs.org (needed for auto-apply)"))
+        results.append(("Node.js (npx)", fail_mark, "Install Node.js 18+ from nodejs.org (needed for auto-apply)"))
 
     # CapSolver (optional)
     capsolver = os.environ.get("CAPSOLVER_API_KEY")
     if capsolver:
         results.append(("CapSolver API key", ok_mark, "CAPTCHA solving enabled"))
     else:
-        results.append(("CapSolver API key", "[dim]optional[/dim]",
-                        "Set CAPSOLVER_API_KEY in .env for CAPTCHA solving"))
+        results.append(
+            ("CapSolver API key", "[dim]optional[/dim]", "Set CAPSOLVER_API_KEY in .env for CAPTCHA solving")
+        )
 
     # --- Render results ---
     console.print()
@@ -505,15 +520,20 @@ def doctor() -> None:
 
     # Tier summary
     from applypilot.config import get_apply_backend, get_tier, TIER_LABELS
+
     tier = get_tier()
     console.print(f"[bold]Current tier: Tier {tier} — {TIER_LABELS[tier]}[/bold]")
     console.print(f"[dim]Preferred apply backend: {get_apply_backend()}[/dim]")
 
     if tier == 1:
         console.print("[dim]  → Tier 2 unlocks: scoring, tailoring, cover letters (needs LLM API key)[/dim]")
-        console.print("[dim]  → Tier 3 unlocks: auto-apply (needs Claude Code or OpenCode CLI + Chrome + Node.js)[/dim]")
+        console.print(
+            "[dim]  → Tier 3 unlocks: auto-apply (needs Claude Code or OpenCode CLI + Chrome + Node.js)[/dim]"
+        )
     elif tier == 2:
-        console.print("[dim]  → Tier 3 unlocks: auto-apply (needs Claude Code or OpenCode CLI + Chrome + Node.js)[/dim]")
+        console.print(
+            "[dim]  → Tier 3 unlocks: auto-apply (needs Claude Code or OpenCode CLI + Chrome + Node.js)[/dim]"
+        )
 
     console.print()
 

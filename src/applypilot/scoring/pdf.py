@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 
 # ── Resume Parser ────────────────────────────────────────────────────────
 
+
 def parse_resume(text: str) -> dict:
     """Parse a structured text resume into sections.
 
@@ -126,9 +127,7 @@ def parse_entries(text: str) -> list[dict]:
             if current:
                 current["bullets"].append(stripped[2:].strip())
         elif current is None or (
-            not stripped.startswith("-")
-            and not stripped.startswith("\u2022")
-            and len(current.get("bullets", [])) > 0
+            not stripped.startswith("-") and not stripped.startswith("\u2022") and len(current.get("bullets", [])) > 0
         ):
             # New entry
             if current:
@@ -148,6 +147,12 @@ def parse_entries(text: str) -> list[dict]:
 
 # ── HTML Template ────────────────────────────────────────────────────────
 
+
+def _escape_html(text: str) -> str:
+    """Escape HTML entities in text."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def build_html(resume: dict) -> str:
     """Build professional resume HTML from parsed data.
 
@@ -159,13 +164,19 @@ def build_html(resume: dict) -> str:
     """
     sections = resume["sections"]
 
+    # Escape text fields used in HTML output
+    name = _escape_html(str(resume["name"]))
+    title = _escape_html(str(resume["title"]))
+    location = _escape_html(str(resume.get("location", "")))
+    contact = _escape_html(str(resume.get("contact", "")))
+
     # Skills
     skills_html = ""
     if "TECHNICAL SKILLS" in sections:
         skills = parse_skills(sections["TECHNICAL SKILLS"])
         rows = ""
         for cat, val in skills:
-            rows += f'<div class="skill-row"><span class="skill-cat">{cat}:</span> {val}</div>\n'
+            rows += f'<div class="skill-row"><span class="skill-cat">{_escape_html(cat)}:</span> {_escape_html(val)}</div>\n'
         skills_html = f'<div class="section"><div class="section-title">Technical Skills</div>{rows}</div>'
 
     # Experience
@@ -174,9 +185,9 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections["EXPERIENCE"])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
-            subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
-            items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
+            bullets = "".join(f"<li>{_escape_html(b)}</li>" for b in e["bullets"])
+            subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
+            items += f'<div class="entry"><div class="entry-title">{_escape_html(e["title"])}</div>{subtitle}<ul>{bullets}</ul></div>'
         exp_html = f'<div class="section"><div class="section-title">Experience</div>{items}</div>'
 
     # Projects
@@ -185,29 +196,30 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections["PROJECTS"])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
-            subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
-            items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
+            bullets = "".join(f"<li>{_escape_html(b)}</li>" for b in e["bullets"])
+            subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
+            items += f'<div class="entry"><div class="entry-title">{_escape_html(e["title"])}</div>{subtitle}<ul>{bullets}</ul></div>'
         proj_html = f'<div class="section"><div class="section-title">Projects</div>{items}</div>'
 
     # Education
     edu_html = ""
     if "EDUCATION" in sections:
-        edu_text = sections["EDUCATION"].strip()
-        edu_html = f'<div class="section"><div class="section-title">Education</div><div class="edu">{edu_text}</div></div>'
+        edu_text = _escape_html(sections["EDUCATION"].strip())
+        edu_html = (
+            f'<div class="section"><div class="section-title">Education</div><div class="edu">{edu_text}</div></div>'
+        )
 
     # Summary
     summary_html = ""
     if "SUMMARY" in sections:
-        summary_html = f'<div class="section"><div class="section-title">Summary</div><div class="summary">{sections["SUMMARY"].strip()}</div></div>'
+        summary_html = f'<div class="section"><div class="section-title">Summary</div><div class="summary">{_escape_html(sections["SUMMARY"].strip())}</div></div>'
 
     # Contact line parsing
-    contact = resume["contact"]
     contact_parts = [p.strip() for p in contact.split("|")] if contact else []
     contact_html = " &nbsp;|&nbsp; ".join(contact_parts)
 
     # Location line (may be empty)
-    location_html = f'<div class="location">{resume["location"]}</div>' if resume["location"] else ""
+    location_html = f'<div class="location">{location}</div>' if location else ""
 
     return f"""<!DOCTYPE html>
 <html>
@@ -317,8 +329,8 @@ li {{
 </head>
 <body>
 <div class="header">
-    <div class="name">{resume['name']}</div>
-    <div class="title">{resume['title']}</div>
+    <div class="name">{name}</div>
+    <div class="title">{title}</div>
     {location_html}
     <div class="contact">{contact_html}</div>
 </div>
@@ -332,6 +344,7 @@ li {{
 
 
 # ── PDF Renderer ─────────────────────────────────────────────────────────
+
 
 def render_pdf(html: str, output_path: str) -> None:
     """Render HTML to PDF using Playwright's headless Chromium.
@@ -357,9 +370,8 @@ def render_pdf(html: str, output_path: str) -> None:
 
 # ── Public API ───────────────────────────────────────────────────────────
 
-def convert_to_pdf(
-    text_path: Path, output_path: Path | None = None, html_only: bool = False
-) -> Path:
+
+def convert_to_pdf(text_path: Path, output_path: Path | None = None, html_only: bool = False) -> Path:
     """Convert a text resume/cover letter to PDF.
 
     Args:
@@ -409,10 +421,7 @@ def batch_convert(limit: int = 50) -> int:
     txt_files = sorted(TAILORED_DIR.glob("*.txt"))
     # Exclude _JOB.txt and _CL.txt files from resume conversion
     # (they get their own conversion calls)
-    candidates = [
-        f for f in txt_files
-        if not f.name.endswith("_JOB.txt")
-    ]
+    candidates = [f for f in txt_files if not f.name.endswith("_JOB.txt")]
 
     # Filter to those without a corresponding PDF
     to_convert: list[Path] = []

@@ -208,7 +208,7 @@ def render_manual_command(backend: str, model: str, prompt_file: Path, config_pa
         return (
             f"OPENCODE_CONFIG={quoted_config} "
             f"opencode run --format json --model {quoted_model} "
-            f"--dangerously-skip-permissions \"$(cat {quoted_prompt})\""
+            f'--dangerously-skip-permissions "$(cat {quoted_prompt})"'
         )
     return (
         f"claude --model {quoted_model} -p "

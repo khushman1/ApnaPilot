@@ -132,8 +132,7 @@ def _mark_synced(urls: list[str], db_path: str | None = None) -> None:
     placeholders = ",".join("?" * len(urls))
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        f"UPDATE jobs SET human_review_synced_at = ?, human_review_sync_error = NULL "
-        f"WHERE url IN ({placeholders})",
+        f"UPDATE jobs SET human_review_synced_at = ?, human_review_sync_error = NULL WHERE url IN ({placeholders})",
         [now] + urls,
     )
     conn.commit()

@@ -31,7 +31,7 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
     """
     path = str(db_path or DB_PATH)
 
-    if not hasattr(_local, 'connections'):
+    if not hasattr(_local, "connections"):
         _local.connections = {}
 
     conn = _local.connections.get(path)
@@ -53,7 +53,7 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
 def close_connection(db_path: Path | str | None = None) -> None:
     """Close the cached connection for the current thread."""
     path = str(db_path or DB_PATH)
-    if hasattr(_local, 'connections'):
+    if hasattr(_local, "connections"):
         conn = _local.connections.pop(path, None)
         if conn is not None:
             conn.close()
@@ -87,9 +87,9 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     conn = get_connection(path)
-    table_existed = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'"
-    ).fetchone() is not None
+    table_existed = (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone() is not None
+    )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             -- Discovery stage (smart_extract / job_search)
@@ -216,8 +216,7 @@ def _meta_get(conn: sqlite3.Connection, key: str) -> str | None:
 def _meta_set(conn: sqlite3.Connection, key: str, value: str) -> None:
     """Upsert a metadata value in app_meta."""
     conn.execute(
-        "INSERT INTO app_meta(key, value) VALUES(?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "INSERT INTO app_meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
     )
 
@@ -232,8 +231,7 @@ def _migrate_legacy_fit_scores(conn: sqlite3.Connection) -> int:
         return 0
 
     changed = conn.execute(
-        "UPDATE jobs SET fit_score = fit_score * 10 "
-        "WHERE fit_score IS NOT NULL AND fit_score BETWEEN 1 AND 10"
+        "UPDATE jobs SET fit_score = fit_score * 10 WHERE fit_score IS NOT NULL AND fit_score BETWEEN 1 AND 10"
     ).rowcount
     _meta_set(conn, "fit_score_scale", "1-100")
     conn.commit()
@@ -300,32 +298,23 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     stats["total"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
     # By site breakdown
-    rows = conn.execute(
-        "SELECT site, COUNT(*) as cnt FROM jobs GROUP BY site ORDER BY cnt DESC"
-    ).fetchall()
+    rows = conn.execute("SELECT site, COUNT(*) as cnt FROM jobs GROUP BY site ORDER BY cnt DESC").fetchall()
     stats["by_site"] = [(row[0], row[1]) for row in rows]
 
     # Enrichment stage
-    stats["pending_detail"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL"
-    ).fetchone()[0]
+    stats["pending_detail"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL").fetchone()[0]
 
-    stats["with_description"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL"
-    ).fetchone()[0]
+    stats["with_description"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL").fetchone()[
+        0
+    ]
 
-    stats["detail_errors"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE detail_error IS NOT NULL"
-    ).fetchone()[0]
+    stats["detail_errors"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE detail_error IS NOT NULL").fetchone()[0]
 
     # Scoring stage
-    stats["scored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL"
-    ).fetchone()[0]
+    stats["scored"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL").fetchone()[0]
 
     stats["unscored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs "
-        "WHERE full_description IS NOT NULL AND fit_score IS NULL"
+        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL"
     ).fetchone()[0]
 
     # Score distribution
@@ -336,21 +325,19 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     ).fetchall()
     stats["score_distribution"] = [(row[0], row[1]) for row in dist_rows]
     stats["score_buckets"] = [
-        ("Human review (90+)", conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE fit_score >= 90"
-        ).fetchone()[0]),
-        ("Auto-eligible (70-89)", conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE fit_score BETWEEN 70 AND 89"
-        ).fetchone()[0]),
-        ("Skip (<70)", conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL AND fit_score < 70"
-        ).fetchone()[0]),
+        ("Human review (90+)", conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score >= 90").fetchone()[0]),
+        (
+            "Auto-eligible (70-89)",
+            conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score BETWEEN 70 AND 89").fetchone()[0],
+        ),
+        (
+            "Skip (<70)",
+            conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL AND fit_score < 70").fetchone()[0],
+        ),
     ]
 
     # Tailoring stage
-    stats["tailored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL"
-    ).fetchone()[0]
+    stats["tailored"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL").fetchone()[0]
 
     stats["untailored_eligible"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
@@ -361,9 +348,7 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     ).fetchone()[0]
 
     stats["tailor_exhausted"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs "
-        "WHERE COALESCE(tailor_attempts, 0) >= 5 "
-        "AND tailored_resume_path IS NULL"
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(tailor_attempts, 0) >= 5 AND tailored_resume_path IS NULL"
     ).fetchone()[0]
 
     # Cover letter stage
@@ -378,13 +363,9 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     ).fetchone()[0]
 
     # Application stage
-    stats["applied"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL"
-    ).fetchone()[0]
+    stats["applied"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL").fetchone()[0]
 
-    stats["apply_errors"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL"
-    ).fetchone()[0]
+    stats["apply_errors"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL").fetchone()[0]
 
     stats["ready_to_apply"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
@@ -399,23 +380,19 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
         "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1"
     ).fetchone()[0]
     stats["human_review_synced"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
-        "AND human_review_synced_at IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 AND human_review_synced_at IS NOT NULL"
     ).fetchone()[0]
     stats["human_review_pending_sync"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
-        "AND human_review_synced_at IS NULL"
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 AND human_review_synced_at IS NULL"
     ).fetchone()[0]
     stats["human_review_sync_errors"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 "
-        "AND human_review_sync_error IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(human_review_required, 0) = 1 AND human_review_sync_error IS NOT NULL"
     ).fetchone()[0]
 
     return stats
 
 
-def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
-               site: str, strategy: str) -> tuple[int, int]:
+def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: str) -> tuple[int, int]:
     """Store discovered jobs, skipping duplicates by URL.
 
     Args:
@@ -439,8 +416,16 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
             conn.execute(
                 "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, job.get("title"), job.get("salary"), job.get("description"),
-                 job.get("location"), site, strategy, now),
+                (
+                    url,
+                    job.get("title"),
+                    job.get("salary"),
+                    job.get("description"),
+                    job.get("location"),
+                    site,
+                    strategy,
+                    now,
+                ),
             )
             new += 1
         except sqlite3.IntegrityError:
@@ -450,10 +435,9 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
     return new, existing
 
 
-def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
-                      stage: str = "discovered",
-                      min_score: int | None = None,
-                      limit: int = 100) -> list[dict]:
+def get_jobs_by_stage(
+    conn: sqlite3.Connection | None = None, stage: str = "discovered", min_score: int | None = None, limit: int = 100
+) -> list[dict]:
     """Fetch jobs filtered by pipeline stage.
 
     Args:
@@ -496,7 +480,7 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
     elif "?" in where:
         params.append(DEFAULTS["min_score"])
 
-    if min_score is not None and "fit_score" not in where and stage in ("scored", "tailored", "applied"):
+    if min_score is not None and stage in ("scored", "tailored", "applied"):
         where += " AND fit_score >= ?"
         params.append(min_score)
 

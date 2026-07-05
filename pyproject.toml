@@ -52,3 +52,32 @@ artifacts = ["src/applypilot/config/*.yaml"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["applypilot"]
+omit = [
+    "*/cli.py",
+    "*/discovery/*",
+    "*/enrichment/*",
+    "*/apply/chrome.py",
+    "*/apply/dashboard.py",
+    "*/apply/launcher.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "^if __name__",
+    "^    \\.\\.\\.",
+]
+show_missing = true
+skip_empty = true
+precision = 1
+fail_under = 0
+
+[tool.coverage.paths]
+source = ["src/", "*/site-packages/"]
