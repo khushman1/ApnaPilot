@@ -7,9 +7,7 @@ from applypilot.scoring.scorer import _parse_score_response
 
 
 def test_parse_score_response_clamps_to_100() -> None:
-    parsed = _parse_score_response(
-        "SCORE: 145\nKEYWORDS: python, automation\nREASONING: Excellent alignment."
-    )
+    parsed = _parse_score_response("SCORE: 145\nKEYWORDS: python, automation\nREASONING: Excellent alignment.")
     assert parsed["score"] == 100
     assert parsed["keywords"] == "python, automation"
 

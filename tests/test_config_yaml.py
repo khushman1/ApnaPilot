@@ -26,6 +26,7 @@ from applypilot.config import (
 
 # ── DEFAULTS ─────────────────────────────────────────────────────────────
 
+
 class TestDefaults:
     def test_min_score_default(self) -> None:
         assert DEFAULTS["min_score"] == 70
@@ -41,6 +42,7 @@ class TestDefaults:
 
 
 # ── get_int_env ─────────────────────────────────────────────────────────
+
 
 class TestGetIntEnv:
     def test_returns_default_when_not_set(self) -> None:
@@ -62,6 +64,7 @@ class TestGetIntEnv:
 
 # ── get_human_review_score ──────────────────────────────────────────────
 
+
 class TestGetHumanReviewScore:
     def test_returns_default(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
@@ -80,6 +83,7 @@ class TestGetHumanReviewScore:
 
 # ── get_apply_backend ───────────────────────────────────────────────────
 
+
 class TestGetApplyBackend:
     def test_returns_claude_default(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
@@ -96,6 +100,7 @@ class TestGetApplyBackend:
 
 
 # ── YAML Loading ─────────────────────────────────────────────────────────
+
 
 class TestLoadSitesConfig:
     def test_loads_sites_yaml(self) -> None:
@@ -150,6 +155,7 @@ class TestLoadSearchConfig:
 
 # ── Tier Detection ──────────────────────────────────────────────────────
 
+
 class TestGetTier:
     def test_tier_1_without_llm(self) -> None:
         env = dict(os.environ)
@@ -179,6 +185,7 @@ class TestGetTier:
 
 
 # ── ensure_dirs ──────────────────────────────────────────────────────────
+
 
 class TestEnsureDirs:
     def test_creates_directories(self, tmp_path: Path) -> None:

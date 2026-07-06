@@ -16,6 +16,7 @@ from applypilot.scoring.cover_letter import (
 
 # ── generate_cover_letter ───────────────────────────────────────────────
 
+
 class TestGenerateCoverLetter:
     def test_returns_letter(self) -> None:
         profile = {
@@ -123,6 +124,7 @@ class TestGenerateCoverLetter:
 
 # ── save_cover_letter_artifacts ─────────────────────────────────────────
 
+
 class TestSaveCoverLetterArtifacts:
     def test_saves_text_file(self, tmp_path: Path) -> None:
         job = {"title": "Software Engineer", "site": "Google"}
@@ -144,6 +146,7 @@ class TestSaveCoverLetterArtifacts:
 
 
 # ── generate_cover_letter_for_job ───────────────────────────────────────
+
 
 class TestGenerateCoverLetterForJob:
     def test_generates_and_saves(self, tmp_path: Path) -> None:

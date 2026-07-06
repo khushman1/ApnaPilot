@@ -30,6 +30,7 @@ from applypilot.apply.agent_backends import (
 
 # ── normalize_backend ────────────────────────────────────────────────────
 
+
 class TestNormalizeBackend:
     def test_normalizes_claude(self) -> None:
         assert normalize_backend("Claude") == "claude"
@@ -48,6 +49,7 @@ class TestNormalizeBackend:
 
 
 # ── backend helpers ──────────────────────────────────────────────────────
+
 
 class TestBackendHelpers:
     def test_backend_binary_claude(self) -> None:
@@ -71,6 +73,7 @@ class TestBackendHelpers:
 
 # ── Permission helpers ───────────────────────────────────────────────────
 
+
 class TestPermissionHelpers:
     def test_opencode_permission_policy(self) -> None:
         policy = get_opencode_permission_policy()
@@ -85,6 +88,7 @@ class TestPermissionHelpers:
 
 
 # ── Claude MCP config ───────────────────────────────────────────────────
+
 
 class TestBuildClaudeMcpConfig:
     def test_contains_playwright_server(self) -> None:
@@ -108,6 +112,7 @@ class TestBuildClaudeMcpConfig:
 
 # ── OpenCode config ──────────────────────────────────────────────────────
 
+
 class TestBuildOpenCodeConfig:
     def test_contains_schema(self) -> None:
         config = build_opencode_config(9333)
@@ -128,6 +133,7 @@ class TestBuildOpenCodeConfig:
 
 # ── build_backend_config ─────────────────────────────────────────────────
 
+
 class TestBuildBackendConfig:
     def test_builds_claude_config(self) -> None:
         config = build_backend_config("claude", 9222)
@@ -139,6 +145,7 @@ class TestBuildBackendConfig:
 
 
 # ── config_filename ──────────────────────────────────────────────────────
+
 
 class TestConfigFilename:
     def test_claude_filename(self) -> None:
@@ -154,6 +161,7 @@ class TestConfigFilename:
 
 
 # ── build_agent_command ──────────────────────────────────────────────────
+
 
 class TestBuildAgentCommand:
     def test_claude_command(self) -> None:
@@ -180,6 +188,7 @@ class TestBuildAgentCommand:
 
 # ── build_agent_env ──────────────────────────────────────────────────────
 
+
 class TestBuildAgentEnv:
     def test_claude_env_cleans_claude_vars(self) -> None:
         with patch("os.environ", {"PATH": "/usr/bin", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "test"}):
@@ -195,6 +204,7 @@ class TestBuildAgentEnv:
 
 
 # ── render_manual_command ────────────────────────────────────────────────
+
 
 class TestRenderManualCommand:
     def test_claude_render(self) -> None:
@@ -212,6 +222,7 @@ class TestRenderManualCommand:
 
 # ── write_backend_config ────────────────────────────────────────────────
 
+
 class TestWriteBackendConfig:
     def test_writes_claude_config(self, tmp_path: Path) -> None:
         path = write_backend_config("claude", 1, 9222, tmp_path)
@@ -225,6 +236,7 @@ class TestWriteBackendConfig:
 
 
 # ── backend_available ────────────────────────────────────────────────────
+
 
 class TestBackendAvailable:
     @patch("shutil.which")

@@ -16,6 +16,7 @@ from applypilot.scoring.tailor import (
 
 # ── extract_json ────────────────────────────────────────────────────────
 
+
 class TestExtractJson:
     def test_parses_plain_json(self) -> None:
         raw = '{"title": "Engineer", "summary": "Experienced"}'
@@ -23,17 +24,17 @@ class TestExtractJson:
         assert result["title"] == "Engineer"
 
     def test_parses_json_fenced(self) -> None:
-        raw = "Here's the JSON:\n\n```json\n{\"title\": \"SWE\"}\n```"
+        raw = 'Here\'s the JSON:\n\n```json\n{"title": "SWE"}\n```'
         result = extract_json(raw)
         assert result["title"] == "SWE"
 
     def test_parses_fenced_without_lang(self) -> None:
-        raw = "```  \n{\"title\": \"Dev\"}\n```"
+        raw = '```  \n{"title": "Dev"}\n```'
         result = extract_json(raw)
         assert result["title"] == "Dev"
 
     def test_parses_curly_braces(self) -> None:
-        raw = "Here is the answer: {\"title\": \"SWE\", \"summary\": \"Good\"}. Let me know!"
+        raw = 'Here is the answer: {"title": "SWE", "summary": "Good"}. Let me know!'
         result = extract_json(raw)
         assert result["title"] == "SWE"
 
@@ -42,7 +43,7 @@ class TestExtractJson:
             extract_json("no json here at all")
 
     def test_ignores_bad_fenced_then_finds_good(self) -> None:
-        raw = "```json\n{invalid\n```\n\n```json\n{\"title\": \"SWE\"}\n```"
+        raw = '```json\n{invalid\n```\n\n```json\n{"title": "SWE"}\n```'
         result = extract_json(raw)
         assert result["title"] == "SWE"
 
@@ -53,6 +54,7 @@ class TestExtractJson:
 
 
 # ── assemble_resume_text ────────────────────────────────────────────────
+
 
 class TestAssembleResumeText:
     def test_builds_full_resume(self) -> None:
@@ -113,6 +115,7 @@ class TestAssembleResumeText:
 
 
 # ── tailor_resume ──────────────────────────────────────────────────────
+
 
 class TestTailorResume:
     def test_approves_on_first_try(self) -> None:
@@ -225,6 +228,7 @@ class TestTailorResume:
 
 
 # ── run_tailoring ──────────────────────────────────────────────────────
+
 
 class TestRunTailoring:
     def test_returns_zero_when_no_jobs(self) -> None:

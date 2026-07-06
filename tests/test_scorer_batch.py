@@ -10,6 +10,7 @@ from applypilot.scoring.scorer import SCORE_PROMPT, score_job
 
 # ── score_job ───────────────────────────────────────────────────────────
 
+
 class TestScoreJob:
     def test_scores_valid_job(self) -> None:
         job = {

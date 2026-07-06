@@ -128,9 +128,7 @@ class TestAssembleResumeText:
             "title": "Senior\u2014Software Engineer",
             "summary": "5\u20147 years experience",
             "skills": {"Languages": "Python\u2013Bash"},
-            "experience": [
-                {"header": "Engineer at Acme Corp", "bullets": ["Built\u2014deployed"]}
-            ],
+            "experience": [{"header": "Engineer at Acme Corp", "bullets": ["Built\u2014deployed"]}],
             "projects": [],
             "education": "University of Waterloo",
         }

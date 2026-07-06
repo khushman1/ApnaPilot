@@ -15,6 +15,7 @@ from applypilot.llm import (
 
 # ── _detect_provider ────────────────────────────────────────────────────
 
+
 class TestDetectProvider:
     def test_gemini_detected(self) -> None:
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
@@ -45,6 +46,7 @@ class TestDetectProvider:
 
 
 # ── LLMClient ───────────────────────────────────────────────────────────
+
 
 class TestLLMClient:
     def test_creates_client(self) -> None:
@@ -144,10 +146,12 @@ class TestLLMClient:
 
 # ── get_client singleton ────────────────────────────────────────────────
 
+
 class TestGetClient:
     def test_returns_same_instance(self) -> None:
         # Reset singleton
         from applypilot import llm as llm_mod
+
         llm_mod._instance = None
         try:
             with patch("applypilot.llm._detect_provider", return_value=("http://x.com", "m", "k")):

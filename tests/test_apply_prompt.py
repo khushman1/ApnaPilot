@@ -70,11 +70,11 @@ SEARCH_CONFIG = {
 
 # ── _build_profile_summary ──────────────────────────────────────────────
 
+
 class TestBuildProfileSummary:
     def test_includes_name(self) -> None:
         summary = _build_profile_summary(MINIMAL_PROFILE)
         assert "John Doe" in summary
-
 
     def test_includes_email(self) -> None:
         summary = _build_profile_summary(MINIMAL_PROFILE)
@@ -96,6 +96,7 @@ class TestBuildProfileSummary:
 
 # ── _build_location_check ──────────────────────────────────────────────
 
+
 class TestBuildLocationCheck:
     def test_includes_profile_city(self) -> None:
         check = _build_location_check(MINIMAL_PROFILE, SEARCH_CONFIG)
@@ -112,6 +113,7 @@ class TestBuildLocationCheck:
 
 # ── _build_salary_section ──────────────────────────────────────────────
 
+
 class TestBuildSalarySection:
     def test_includes_min_salary(self) -> None:
         section = _build_salary_section(MINIMAL_PROFILE)
@@ -125,10 +127,16 @@ class TestBuildSalarySection:
         profile = dict(MINIMAL_PROFILE)
         profile["salary_expectations"] = {}
         section = _build_salary_section(profile)
-        assert "negotiable" in section.lower() or "reasonable" in section.lower() or "negotiate" in section.lower() or len(section.strip()) > 0
+        assert (
+            "negotiable" in section.lower()
+            or "reasonable" in section.lower()
+            or "negotiate" in section.lower()
+            or len(section.strip()) > 0
+        )
 
 
 # ── _build_screening_section ──────────────────────────────────────────
+
 
 class TestBuildScreeningSection:
     def test_includes_location(self) -> None:
@@ -149,6 +157,7 @@ class TestBuildScreeningSection:
 
 
 # ── _build_hard_rules ──────────────────────────────────────────────────
+
 
 class TestBuildHardRules:
     def test_includes_display_name(self) -> None:
@@ -181,6 +190,7 @@ class TestBuildHardRules:
 
 
 # ── _build_captcha_section ─────────────────────────────────────────────
+
 
 class TestBuildCaptchaSection:
     def test_returns_section(self) -> None:

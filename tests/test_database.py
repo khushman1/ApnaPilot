@@ -13,17 +13,13 @@ class TestInitDb:
     def test_creates_jobs_table(self, tmp_path) -> None:
         db_path = tmp_path / "test.db"
         conn = init_db(db_path=str(db_path))
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"
-        ).fetchall()
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'").fetchall()
         assert len(tables) == 1
 
     def test_creates_app_meta_table(self, tmp_path) -> None:
         db_path = tmp_path / "test.db"
         conn = init_db(db_path=str(db_path))
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='app_meta'"
-        ).fetchall()
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_meta'").fetchall()
         assert len(tables) == 1
 
     def test_idempotent_safe_to_call_twice(self, tmp_path) -> None:

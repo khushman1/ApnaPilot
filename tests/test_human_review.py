@@ -163,20 +163,24 @@ def test_build_rows_uses_fixed_schema_and_cover_letter_queue(tmp_path) -> None:
     cover_letter_path = tmp_path / "letter.txt"
     cover_letter_path.write_text("Dear Hiring Manager,\nTest letter", encoding="utf-8")
 
-    rows = _build_rows([{
-        "url": "https://example.com/job",
-        "application_url": "https://example.com/apply",
-        "title": "Engineer",
-        "site": "LinkedIn",
-        "location": "Remote",
-        "fit_score": 91,
-        "score_reasoning": "python\nStrong fit",
-        "human_review_reason": "cover_letter_required",
-        "cover_letter_path": str(cover_letter_path),
-        "discovered_at": "2026-01-01T00:00:00Z",
-        "scored_at": "2026-01-01T01:00:00Z",
-        "human_review_marked_at": "2026-01-01T02:00:00Z",
-    }])
+    rows = _build_rows(
+        [
+            {
+                "url": "https://example.com/job",
+                "application_url": "https://example.com/apply",
+                "title": "Engineer",
+                "site": "LinkedIn",
+                "location": "Remote",
+                "fit_score": 91,
+                "score_reasoning": "python\nStrong fit",
+                "human_review_reason": "cover_letter_required",
+                "cover_letter_path": str(cover_letter_path),
+                "discovered_at": "2026-01-01T00:00:00Z",
+                "scored_at": "2026-01-01T01:00:00Z",
+                "human_review_marked_at": "2026-01-01T02:00:00Z",
+            }
+        ]
+    )
 
     row = rows[0]
     assert list(row.keys()) == FIXED_SHEET_COLUMNS

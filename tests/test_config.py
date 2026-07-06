@@ -32,8 +32,11 @@ class TestGetChromePath:
         else:
             monkeypatch.setattr(
                 "applypilot.config.shutil.which",
-                lambda name: str(Path("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"))
-                if name == "google-chrome" else None,
+                lambda name: (
+                    str(Path("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"))
+                    if name == "google-chrome"
+                    else None
+                ),
             )
 
         path = config.get_chrome_path()
@@ -50,7 +53,9 @@ class TestGetChromePath:
         if system == "Darwin":
             (Path("/Applications/Google Chrome.app/Contents/MacOS") / "Google Chrome").touch()
         elif system == "Windows":
-            (Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google/Chrome/Application").mkdir(parents=True, exist_ok=True)
+            (Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google/Chrome/Application").mkdir(
+                parents=True, exist_ok=True
+            )
 
         with pytest.raises(FileNotFoundError, match="Chrome/Chromium not found"):
             config.get_chrome_path()
@@ -141,7 +146,8 @@ class TestTierDetection:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("LLM_URL", raising=False)
         monkeypatch.setattr(
-            config.shutil, "which",
+            config.shutil,
+            "which",
             lambda name: None,
         )
         assert config.get_tier() == 2
@@ -149,7 +155,8 @@ class TestTierDetection:
     def test_tier_3_with_all_deps(self, monkeypatch) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setattr(
-            config.shutil, "which",
+            config.shutil,
+            "which",
             lambda name: "/usr/bin/claude" if name == "claude" else None,
         )
         monkeypatch.setattr(config, "get_chrome_path", lambda: "/usr/bin/google-chrome")
@@ -159,9 +166,14 @@ class TestTierDetection:
 class TestConstants:
     def test_defaults_contain_expected_keys(self) -> None:
         expected_keys = {
-            "min_score", "human_review_score", "max_apply_attempts",
-            "max_tailor_attempts", "poll_interval", "apply_timeout",
-            "viewport", "google_sheets_timeout_sec",
+            "min_score",
+            "human_review_score",
+            "max_apply_attempts",
+            "max_tailor_attempts",
+            "poll_interval",
+            "apply_timeout",
+            "viewport",
+            "google_sheets_timeout_sec",
         }
         assert set(config.DEFAULTS.keys()) == expected_keys
 
@@ -176,6 +188,7 @@ class TestConstants:
 class TestPathConstants:
     def test_app_dir_uses_env_or_default(self, tmp_path, monkeypatch) -> None:
         import applypilot.config as cfg
+
         original_app = cfg.APP_DIR
         original_db = cfg.DB_PATH
         cfg.APP_DIR = tmp_path / "custom"

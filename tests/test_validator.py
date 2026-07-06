@@ -55,7 +55,7 @@ class TestSanitizeText:
         assert "a-b" == sanitize_text("a\u2013b")
 
     def test_replaces_smart_quotes(self) -> None:
-        assert 'He said "hello"' == sanitize_text('He said \u201chello\u201d')
+        assert 'He said "hello"' == sanitize_text("He said \u201chello\u201d")
 
     def test_replaces_smart_single_quotes(self) -> None:
         assert "It's" == sanitize_text("It\u2019s")
@@ -99,9 +99,7 @@ class TestValidateJsonFields:
             "title": "Software Engineer",
             "summary": "Passionate about building APIs",
             "skills": {"Languages": "Python"},
-            "experience": [
-                {"header": "Engineer at Acme Corp", "bullets": ["Spearheaded the API project"]}
-            ],
+            "experience": [{"header": "Engineer at Acme Corp", "bullets": ["Spearheaded the API project"]}],
             "projects": [{"header": "BotBuilder", "bullets": ["Built"]}],
             "education": "University of Waterloo | BSc",
         }
@@ -186,9 +184,7 @@ class TestValidateJsonFields:
             "title": "Software Engineer",
             "summary": "5 years of building APIs",
             "skills": {"Languages": "Python"},
-            "experience": [
-                {"header": "Engineer at Acme Corp", "bullets": ["Here is the corrected version"]}
-            ],
+            "experience": [{"header": "Engineer at Acme Corp", "bullets": ["Here is the corrected version"]}],
             "projects": [{"header": "BotBuilder", "bullets": ["Built"]}],
             "education": "University of Waterloo | BSc",
         }
@@ -232,9 +228,7 @@ University of Waterloo | BSc Computer Science
         assert not result["errors"]
 
     def test_fails_missing_section(self) -> None:
-        resume = self._make_valid_resume().replace("SUMMARY", "OVERVIEW").replace(
-            "TECHNICAL SKILLS", ""
-        )
+        resume = self._make_valid_resume().replace("SUMMARY", "OVERVIEW").replace("TECHNICAL SKILLS", "")
         result = validate_tailored_resume(resume, MINIMAL_PROFILE)
         assert not result["passed"]
         assert any("TECHNICAL SKILLS" in e for e in result["errors"])

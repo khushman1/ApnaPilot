@@ -7,6 +7,7 @@ from applypilot.scoring.pdf import build_html, parse_entries, parse_resume, pars
 
 # ── parse_resume ────────────────────────────────────────────────────────
 
+
 class TestParseResume:
     def test_parses_header_and_sections(self) -> None:
         text = """\
@@ -89,6 +90,7 @@ Languages: Python
 
 # ── parse_skills ────────────────────────────────────────────────────────
 
+
 class TestParseSkills:
     def test_parses_categories(self) -> None:
         text = """\
@@ -117,6 +119,7 @@ Docker, Kubernetes
 
 
 # ── parse_entries ───────────────────────────────────────────────────────
+
 
 class TestParseEntries:
     def test_parses_job_entries(self) -> None:
@@ -155,6 +158,7 @@ Go | 2022-2024
 
 
 # ── build_html ─────────────────────────────────────────────────────────
+
 
 class TestBuildHtml:
     def test_generates_valid_html(self) -> None:
