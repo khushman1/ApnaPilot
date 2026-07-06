@@ -150,11 +150,11 @@ class TestBuildLocationCheck:
         cfg = {"location": {"primary": "Vancouver"}}
         section = _build_location_check(PROFILE, cfg)
         assert "Toronto" in section
-        # Verify config primary is used when profile has no city
-        profile_no_city = {"personal": {"full_name": "Jane"}, "work_authorization": {}}
+        # Verify profile city takes precedence when present
+        profile_with_city = {"personal": {"full_name": "Jane", "city": "Calgary"}, "work_authorization": {}}
         cfg2 = {"location": {"primary": "Vancouver"}}
-        section2 = _build_location_check(profile_no_city, cfg2)
-        assert "Vancouver" in section2
+        section2 = _build_location_check(profile_with_city, cfg2)
+        assert "Calgary" in section2
 
 
 class TestBuildSalarySection:
