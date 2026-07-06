@@ -28,12 +28,14 @@ def test_run_discovery_uses_boards_key(monkeypatch) -> None:
 
     monkeypatch.setattr(jobspy, "_full_crawl", fake_full_crawl)
 
-    result = jobspy.run_discovery({
-        "boards": ["indeed", "linkedin"],
-        "queries": [{"query": "Product Manager", "tier": 1}],
-        "locations": [{"location": "Remote", "remote": True}],
-        "defaults": {"results_per_site": 10, "hours_old": 24},
-    })
+    result = jobspy.run_discovery(
+        {
+            "boards": ["indeed", "linkedin"],
+            "queries": [{"query": "Product Manager", "tier": 1}],
+            "locations": [{"location": "Remote", "remote": True}],
+            "defaults": {"results_per_site": 10, "hours_old": 24},
+        }
+    )
 
     assert result["queries"] == 0
     assert captured["sites"] == ["indeed", "linkedin"]
@@ -48,15 +50,19 @@ def test_run_one_search_continues_when_one_board_fails(monkeypatch) -> None:
         calls.append(site)
         if site == "zip_recruiter":
             raise RuntimeError("ZipRecruiter response status code 403")
-        return pd.DataFrame([{
-            "job_url": "https://example.com/job",
-            "title": "Product Manager",
-            "company": "Example",
-            "location": "Remote",
-            "description": "A detailed remote product manager role." * 20,
-            "site": site,
-            "is_remote": True,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "job_url": "https://example.com/job",
+                    "title": "Product Manager",
+                    "company": "Example",
+                    "location": "Remote",
+                    "description": "A detailed remote product manager role." * 20,
+                    "site": site,
+                    "is_remote": True,
+                }
+            ]
+        )
 
     stored: dict = {}
 
@@ -88,13 +94,15 @@ def test_run_one_search_continues_when_one_board_fails(monkeypatch) -> None:
 
 
 def test_location_filter_derives_india_locations_and_blocks_other_remote_regions() -> None:
-    filt = load_location_filter({
-        "locations": [
-            {"location": "Bengaluru, Karnataka, India", "remote": True},
-            {"location": "Gurugram, Haryana, India", "remote": True},
-            {"location": "APAC", "remote": True},
-        ]
-    })
+    filt = load_location_filter(
+        {
+            "locations": [
+                {"location": "Bengaluru, Karnataka, India", "remote": True},
+                {"location": "Gurugram, Haryana, India", "remote": True},
+                {"location": "APAC", "remote": True},
+            ]
+        }
+    )
 
     assert location_ok("Bengaluru, Karnataka, India", filt) is True
     assert location_ok("Remote - India", filt) is True
@@ -104,11 +112,13 @@ def test_location_filter_derives_india_locations_and_blocks_other_remote_regions
 
 
 def test_location_filter_can_explicitly_allow_worldwide_remote() -> None:
-    filt = load_location_filter({
-        "location": {
-            "accept_patterns": ["India"],
-            "remote_anywhere": True,
+    filt = load_location_filter(
+        {
+            "location": {
+                "accept_patterns": ["India"],
+                "remote_anywhere": True,
+            }
         }
-    })
+    )
 
     assert location_ok("Remote - United States", filt) is True
